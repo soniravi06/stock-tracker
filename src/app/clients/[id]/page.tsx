@@ -1,11 +1,13 @@
 import { requireSession, getAuthorizedClient } from "@/lib/access";
 import { prisma } from "@/lib/prisma";
 import { AppShell } from "@/components/AppShell";
-import { buildGainSummary } from "@/lib/fifo";
+import { buildHoldings } from "@/lib/fifo";
 import { getPrices } from "@/lib/prices";
 import { inr, fmtDate, fmtNum } from "@/lib/format";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { HoldingsTable } from "@/components/HoldingsTable";
+import { CompletedTradesTable } from "@/components/CompletedTradesTable";
 
 export default async function ClientDetailPage({
   params,
@@ -17,10 +19,14 @@ export default async function ClientDetailPage({
   const client = await getAuthorizedClient(id);
   if (!client) notFound();
 
-  const [transactions, payments] = await Promise.all([
+  const [lots, completedTrades, payments] = await Promise.all([
     prisma.transaction.findMany({
       where: { clientId: id, deletedAt: null },
-      orderBy: { tradeDate: "desc" },
+      orderBy: { tradeDate: "asc" },
+    }),
+    prisma.completedTrade.findMany({
+      where: { clientId: id, deletedAt: null },
+      orderBy: { sellDate: "desc" },
     }),
     prisma.payment.findMany({
       where: { clientId: id, deletedAt: null },
@@ -28,30 +34,41 @@ export default async function ClientDetailPage({
     }),
   ]);
 
-  // Prices
+  const holdings = buildHoldings(lots);
+
+  // Fetch prices
   const symbols = Array.from(
-    new Set(transactions.map((t) => `${t.symbol}:${t.exchange}`))
+    new Set(holdings.map((h) => `${h.symbol}:${h.exchange}`))
   ).map((s) => {
     const [symbol, exchange] = s.split(":");
     return { symbol, exchange: exchange as "NSE" | "BSE" };
   });
   const priceMap = await getPrices(symbols);
 
-  const summary = buildGainSummary(transactions, priceMap);
-
   let portfolioValue = 0;
-  for (const h of summary.holdings) {
+  let totalUnrealized = 0;
+  for (const h of holdings) {
     const px = priceMap.get(h.symbol);
-    if (px != null) portfolioValue += px * h.quantity;
+    if (px != null) {
+      portfolioValue += px * h.totalQty;
+      totalUnrealized += (px - h.avgCostPerShare) * h.totalQty;
+    }
   }
 
+  const totalRealized = completedTrades.reduce((s, t) => s + t.netPnL, 0);
+  const totalCommission = completedTrades.reduce((s, t) => s + t.commissionAmount, 0);
+
   const canEdit = session.user.role !== "client";
+
+  // Build price map as plain object for client components
+  const pricesPlain: Record<string, number> = {};
+  for (const [k, v] of priceMap.entries()) pricesPlain[k] = v;
 
   return (
     <AppShell role={session.user.role} userName={session.user.name || session.user.email} currentPath="/clients">
       <div style={{ marginBottom: "2rem" }}>
         <Link href="/clients" style={{ fontSize: "0.8rem", color: "#9ca3af" }}>← All clients</Link>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginTop: "0.75rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginTop: "0.75rem", gap: "1rem", flexWrap: "wrap" }}>
           <div>
             <h1 style={{ fontSize: "2rem", fontWeight: 700, letterSpacing: "-0.02em" }}>{client.name}</h1>
             <div style={{ color: "#9ca3af", marginTop: "0.35rem", fontSize: "0.875rem" }}>
@@ -59,14 +76,14 @@ export default async function ClientDetailPage({
               {client.phone && <>📞 {client.phone}</>}
             </div>
             <div style={{ fontSize: "0.75rem", color: "#9ca3af", marginTop: "0.35rem" }}>
-              Commission: {client.defaultCommissionType === "percentage"
+              Default commission: {client.defaultCommissionType === "percentage"
                 ? `${client.defaultCommissionValue}%`
                 : `₹${client.defaultCommissionValue} flat`}
             </div>
           </div>
           {canEdit && (
             <div style={{ display: "flex", gap: "0.5rem" }}>
-              <Link href={`/clients/${id}/transactions/new`} className="btn btn-primary">+ Transaction</Link>
+              <Link href={`/clients/${id}/buy/new`} className="btn btn-primary">+ Buy</Link>
               <Link href={`/clients/${id}/payments/new`} className="btn btn-ghost">+ Payment</Link>
             </div>
           )}
@@ -80,142 +97,70 @@ export default async function ClientDetailPage({
           <div className="stat-value">{inr(portfolioValue)}</div>
         </div>
         <div className="glass stat-card">
-          <div className="stat-label">Unrealized</div>
-          <div className={`stat-value ${summary.totals.unrealizedTotal >= 0 ? "pos" : "neg"}`}>
-            {inr(summary.totals.unrealizedTotal)}
+          <div className="stat-label">Unrealized P&L</div>
+          <div className={`stat-value ${totalUnrealized >= 0 ? "pos" : "neg"}`}>
+            {inr(totalUnrealized)}
           </div>
         </div>
         <div className="glass stat-card">
-          <div className="stat-label">Realized STCG</div>
-          <div className={`stat-value ${summary.totals.realizedSTCG >= 0 ? "pos" : "neg"}`} style={{ fontSize: "1.35rem" }}>
-            {inr(summary.totals.realizedSTCG)}
+          <div className="stat-label">Realized P&L (net)</div>
+          <div className={`stat-value ${totalRealized >= 0 ? "pos" : "neg"}`}>
+            {inr(totalRealized)}
           </div>
         </div>
         <div className="glass stat-card">
-          <div className="stat-label">Realized LTCG</div>
-          <div className={`stat-value ${summary.totals.realizedLTCG >= 0 ? "pos" : "neg"}`} style={{ fontSize: "1.35rem" }}>
-            {inr(summary.totals.realizedLTCG)}
-          </div>
+          <div className="stat-label">Commission Paid</div>
+          <div className="stat-value" style={{ fontSize: "1.4rem" }}>{inr(totalCommission)}</div>
         </div>
       </div>
 
-      {/* Holdings */}
       <SectionHeader title="Current Holdings" />
-      <div className="glass" style={{ overflow: "hidden", marginBottom: "2rem" }}>
-        <table className="data">
-          <thead>
-            <tr>
-              <th>Symbol</th>
-              <th style={{ textAlign: "right" }}>Qty</th>
-              <th style={{ textAlign: "right" }}>Avg Cost</th>
-              <th style={{ textAlign: "right" }}>Current Price</th>
-              <th style={{ textAlign: "right" }}>Market Value</th>
-              <th style={{ textAlign: "right" }}>Unrealized</th>
-            </tr>
-          </thead>
-          <tbody>
-            {summary.holdings.length === 0 && (
-              <tr><td colSpan={6} style={{ textAlign: "center", color: "#9ca3af", padding: "2rem" }}>No open positions.</td></tr>
-            )}
-            {summary.holdings.map((h) => {
-              const price = priceMap.get(h.symbol);
-              const mv = price != null ? price * h.quantity : null;
-              const unrl = price != null ? (price - h.avgCostPerShare) * h.quantity : null;
-              return (
-                <tr key={h.symbol}>
-                  <td style={{ fontWeight: 600 }}>{h.symbol}</td>
-                  <td style={{ textAlign: "right" }}>{fmtNum(h.quantity, 0)}</td>
-                  <td style={{ textAlign: "right" }}>{inr(h.avgCostPerShare)}</td>
-                  <td style={{ textAlign: "right" }}>{price != null ? inr(price) : "—"}</td>
-                  <td style={{ textAlign: "right" }}>{mv != null ? inr(mv) : "—"}</td>
-                  <td style={{ textAlign: "right" }} className={(unrl ?? 0) >= 0 ? "pos" : "neg"}>
-                    {unrl != null ? inr(unrl) : "—"}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <HoldingsTable
+        holdings={holdings.map((h) => ({
+          symbol: h.symbol,
+          exchange: h.exchange,
+          totalQty: h.totalQty,
+          avgCostPerShare: h.avgCostPerShare,
+          totalCostBasis: h.totalCostBasis,
+          lots: h.lots.map((l) => ({
+            transactionId: l.transactionId,
+            buyDate: l.buyDate.toISOString(),
+            originalQty: l.originalQty,
+            remainingQty: l.remainingQty,
+            pricePerShare: l.pricePerShare,
+          })),
+        }))}
+        prices={pricesPlain}
+        clientId={id}
+        defaultCommissionType={client.defaultCommissionType}
+        defaultCommissionValue={client.defaultCommissionValue}
+        canEdit={canEdit}
+      />
 
-      {/* Transactions */}
-      <SectionHeader title="Transactions" />
-      <div className="glass" style={{ overflow: "hidden", marginBottom: "2rem" }}>
-        <table className="data">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Symbol</th>
-              <th>Type</th>
-              <th style={{ textAlign: "right" }}>Qty</th>
-              <th style={{ textAlign: "right" }}>Price</th>
-              <th style={{ textAlign: "right" }}>Commission</th>
-              <th style={{ textAlign: "right" }}>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {transactions.length === 0 && (
-              <tr><td colSpan={7} style={{ textAlign: "center", color: "#9ca3af", padding: "2rem" }}>No transactions.</td></tr>
-            )}
-            {transactions.map((t) => {
-              const gross = t.quantity * t.pricePerShare;
-              const net = t.type === "buy" ? gross + t.commissionAmount : gross - t.commissionAmount;
-              return (
-                <tr key={t.id}>
-                  <td>{fmtDate(t.tradeDate)}</td>
-                  <td style={{ fontWeight: 600 }}>{t.symbol} <span style={{ color: "#6b7280", fontSize: "0.7rem" }}>{t.exchange}</span></td>
-                  <td><span className={`badge badge-${t.type}`}>{t.type}</span></td>
-                  <td style={{ textAlign: "right" }}>{fmtNum(t.quantity, 0)}</td>
-                  <td style={{ textAlign: "right" }}>{inr(t.pricePerShare)}</td>
-                  <td style={{ textAlign: "right", color: "#9ca3af" }}>{inr(t.commissionAmount)}</td>
-                  <td style={{ textAlign: "right", fontWeight: 600 }}>{inr(net)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <div style={{ height: 32 }} />
 
-      {/* Realized gains breakdown */}
-      {summary.realized.length > 0 && (
-        <>
-          <SectionHeader title="Realized Gains (FIFO)" />
-          <div className="glass" style={{ overflow: "hidden", marginBottom: "2rem" }}>
-            <table className="data">
-              <thead>
-                <tr>
-                  <th>Sell Date</th>
-                  <th>Symbol</th>
-                  <th style={{ textAlign: "right" }}>Qty</th>
-                  <th style={{ textAlign: "right" }}>Proceeds (net)</th>
-                  <th style={{ textAlign: "right" }}>Cost Basis</th>
-                  <th style={{ textAlign: "right" }}>Gain</th>
-                  <th>Days Held</th>
-                  <th>Class</th>
-                </tr>
-              </thead>
-              <tbody>
-                {summary.realized.map((r, i) => (
-                  <tr key={i}>
-                    <td>{fmtDate(r.sellDate)}</td>
-                    <td style={{ fontWeight: 600 }}>{r.symbol}</td>
-                    <td style={{ textAlign: "right" }}>{fmtNum(r.quantity, 0)}</td>
-                    <td style={{ textAlign: "right" }}>{inr(r.saleProceedsNet)}</td>
-                    <td style={{ textAlign: "right" }}>{inr(r.costBasis)}</td>
-                    <td style={{ textAlign: "right", fontWeight: 600 }} className={r.gain >= 0 ? "pos" : "neg"}>
-                      {inr(r.gain)}
-                    </td>
-                    <td style={{ color: "#9ca3af" }}>{r.holdingDays}</td>
-                    <td><span className={`badge badge-${r.classification.toLowerCase()}`}>{r.classification}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
+      <SectionHeader title="Completed Trades — Realized P&L" />
+      <CompletedTradesTable
+        trades={completedTrades.map((t) => ({
+          id: t.id,
+          symbol: t.symbol,
+          sellDate: t.sellDate.toISOString(),
+          sellQty: t.sellQty,
+          sellPricePerShare: t.sellPricePerShare,
+          avgBuyPrice: t.avgBuyPrice,
+          grossPnL: t.grossPnL,
+          commissionType: t.commissionType,
+          commissionValue: t.commissionValue,
+          commissionAmount: t.commissionAmount,
+          netPnL: t.netPnL,
+          matchedLotsJson: t.matchedLotsJson,
+          notes: t.notes,
+        }))}
+        canEdit={canEdit}
+      />
 
-      {/* Payments */}
+      <div style={{ height: 32 }} />
+
       <SectionHeader title="Payments" />
       <div className="glass" style={{ overflow: "hidden" }}>
         <table className="data">
@@ -250,7 +195,7 @@ export default async function ClientDetailPage({
 
 function SectionHeader({ title }: { title: string }) {
   return (
-    <h2 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "0.75rem", color: "#a78bfa", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+    <h2 style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.75rem", color: "#a78bfa", textTransform: "uppercase", letterSpacing: "0.08em" }}>
       {title}
     </h2>
   );

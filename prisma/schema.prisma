@@ -1,27 +1,30 @@
-// Stock Portfolio Tracker - Prisma Schema
-// Local: SQLite. Production: switch provider to "postgresql" and set DATABASE_URL to Supabase.
+// Stock Portfolio Tracker - Schema v0.2 (Position Model)
+//
+// Model:
+//   - Transaction row = a BUY lot. `remainingQty` tracks how many shares from
+//     this lot are still open. When sold, lot remainingQty decrements.
+//   - CompletedTrade row = a SELL event that consumed one or more buy lots.
+//     Stores weighted-avg buy price, sell price, commission, P&L.
+//     Stores JSON snapshot of which lots were matched for display + audit.
+//   - No LTCG/STCG logic in this phase.
+//
+// Defaults to postgres for production. For local SQLite dev, change
+// provider to "sqlite" and DATABASE_URL to "file:./dev.db" in .env.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
-// =========================================================
-// ROLES: superadmin (one seeded), admin (created by super), client (read-only, created by admin)
-// =========================================================
 enum Role {
   superadmin
   admin
   client
-}
-
-enum TxType {
-  buy
-  sell
 }
 
 enum Exchange {
@@ -44,20 +47,15 @@ enum PaymentStatus {
   received
 }
 
-// =========================================================
-
 model User {
   id             String    @id @default(cuid())
   email          String    @unique
   passwordHash   String
   role           Role
   name           String?
-  // For client logins: which Client record this user represents (read-only scope)
   linkedClientId String?   @unique
   linkedClient   Client?   @relation("ClientLogin", fields: [linkedClientId], references: [id])
-  // Clients owned by this user (if admin)
   clientsOwned   Client[]  @relation("AdminClients")
-  // Audit trail actorship
   auditLogs      AuditLog[] @relation("Actor")
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -65,59 +63,87 @@ model User {
 }
 
 model Client {
-  id                      String         @id @default(cuid())
+  id                      String           @id @default(cuid())
   adminId                 String
-  admin                   User           @relation("AdminClients", fields: [adminId], references: [id])
+  admin                   User             @relation("AdminClients", fields: [adminId], references: [id])
   name                    String
   email                   String?
   phone                   String?
-  // Default commission applied to all transactions for this client unless overridden
-  defaultCommissionType   CommissionType @default(percentage)
-  defaultCommissionValue  Float          @default(0.5) // 0.5% default
-  // Reverse relation for client-login user
-  loginUser               User?          @relation("ClientLogin")
+  defaultCommissionType   CommissionType   @default(percentage)
+  defaultCommissionValue  Float            @default(0.5)
+  loginUser               User?            @relation("ClientLogin")
   transactions            Transaction[]
+  completedTrades         CompletedTrade[]
   payments                Payment[]
-  createdAt               DateTime       @default(now())
-  updatedAt               DateTime       @updatedAt
+  createdAt               DateTime         @default(now())
+  updatedAt               DateTime         @updatedAt
   deletedAt               DateTime?
 
   @@index([adminId])
 }
 
+// A BUY lot. Sells are no longer transactions — they become CompletedTrade rows.
 model Transaction {
-  id                     String    @id @default(cuid())
-  clientId               String
-  client                 Client    @relation(fields: [clientId], references: [id])
-  symbol                 String    // e.g. "RELIANCE"
-  exchange               Exchange  @default(NSE)
-  type                   TxType
-  quantity               Float
-  pricePerShare          Float
-  tradeDate              DateTime
-  commissionAmount       Float     @default(0) // absolute INR amount, computed at entry time
-  notes                  String?
-  // Immutability: if this tx was reversed by a later correction, point to it
-  reversedByTransactionId String?  @unique
-  reversedBy             Transaction?  @relation("Reversal", fields: [reversedByTransactionId], references: [id])
-  reverses               Transaction?  @relation("Reversal")
-  createdByUserId        String
-  payments               Payment[]
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
-  deletedAt              DateTime?
+  id                String    @id @default(cuid())
+  clientId          String
+  client            Client    @relation(fields: [clientId], references: [id])
+  symbol            String
+  exchange          Exchange  @default(NSE)
+  quantity          Float     // Original buy quantity
+  remainingQty      Float     // Decreases as shares are sold via CompletedTrade
+  pricePerShare     Float
+  tradeDate         DateTime
+  notes             String?
+  createdByUserId   String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
 
   @@index([clientId])
   @@index([symbol])
   @@index([tradeDate])
+  @@index([deletedAt])
+}
+
+// A completed sell event. May have consumed multiple buy lots (FIFO).
+// The matchedLotsJson field stores:
+//   [{ buyTransactionId, buyDate, buyPrice, qty }]
+// so we can render the expandable breakdown and audit the match.
+model CompletedTrade {
+  id                String    @id @default(cuid())
+  clientId          String
+  client            Client    @relation(fields: [clientId], references: [id])
+  symbol            String
+  exchange          Exchange  @default(NSE)
+  sellDate          DateTime
+  sellQty           Float
+  sellPricePerShare Float
+  // Weighted average buy price across all matched lots (commission-free)
+  avgBuyPrice       Float
+  totalBuyCost      Float     // sum of (lotQty * lotPrice) across matched lots
+  totalSellProceeds Float     // sellQty * sellPricePerShare
+  grossPnL          Float     // totalSellProceeds - totalBuyCost
+  commissionType    CommissionType
+  commissionValue   Float     // the % or flat value as entered
+  commissionAmount  Float     // the computed absolute commission in INR
+  netPnL            Float     // grossPnL - commissionAmount
+  matchedLotsJson   String    // JSON array of matched lot breakdowns
+  notes             String?
+  createdByUserId   String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+
+  @@index([clientId])
+  @@index([symbol])
+  @@index([sellDate])
+  @@index([deletedAt])
 }
 
 model Payment {
   id              String           @id @default(cuid())
   clientId        String
   client          Client           @relation(fields: [clientId], references: [id])
-  transactionId   String?
-  transaction     Transaction?     @relation(fields: [transactionId], references: [id])
   amount          Float
   direction       PaymentDirection
   status          PaymentStatus    @default(pending)
@@ -132,7 +158,6 @@ model Payment {
   @@index([status])
 }
 
-// Cached live prices from Yahoo Finance (5-10 min TTL)
 model PriceSnapshot {
   id         String   @id @default(cuid())
   symbol     String
@@ -144,19 +169,17 @@ model PriceSnapshot {
   @@index([fetchedAt])
 }
 
-// Immutable audit trail - every create/edit/soft-delete logged
 model AuditLog {
   id                String   @id @default(cuid())
   actorUserId       String
   actor             User     @relation("Actor", fields: [actorUserId], references: [id])
   actorRole         Role
-  // If a superadmin acted on an admin's data, record which admin
   onBehalfOfAdminId String?
-  action            String   // "create" | "update" | "soft_delete" | "restore"
-  entityType        String   // "Client" | "Transaction" | "Payment" | "User"
+  action            String
+  entityType        String   // "Client" | "Transaction" | "CompletedTrade" | "Payment" | "User"
   entityId          String
-  beforeJson        String?  // JSON serialized
-  afterJson         String?  // JSON serialized
+  beforeJson        String?
+  afterJson         String?
   ipAddress         String?
   createdAt         DateTime @default(now())
 

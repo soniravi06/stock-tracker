@@ -10,7 +10,7 @@ export default async function ClientsListPage() {
   const clients = await prisma.client.findMany({
     where,
     include: {
-      _count: { select: { transactions: true, payments: true } },
+      _count: { select: { transactions: true, completedTrades: true, payments: true } },
       admin: { select: { name: true, email: true } },
     },
     orderBy: { createdAt: "desc" },
@@ -39,9 +39,9 @@ export default async function ClientsListPage() {
               <th>Name</th>
               <th>Contact</th>
               {isSuper && <th>Managed by</th>}
-              <th>Commission</th>
-              <th>Txns</th>
-              <th>Payments</th>
+              <th>Default Commission</th>
+              <th>Buy Lots</th>
+              <th>Closed Trades</th>
               <th>Created</th>
               <th></th>
             </tr>
@@ -63,7 +63,7 @@ export default async function ClientsListPage() {
                     : `₹${c.defaultCommissionValue} flat`}
                 </td>
                 <td>{c._count.transactions}</td>
-                <td>{c._count.payments}</td>
+                <td>{c._count.completedTrades}</td>
                 <td style={{ color: "#9ca3af", fontSize: "0.8rem" }}>{fmtDate(c.createdAt)}</td>
                 <td style={{ textAlign: "right" }}>
                   <Link href={`/clients/${c.id}`} className="btn btn-ghost" style={{ fontSize: "0.75rem", padding: "0.35rem 0.75rem" }}>

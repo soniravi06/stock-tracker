@@ -4,13 +4,19 @@ import bcrypt from "bcryptjs";
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log("🌱 Seeding database...");
+  console.log("🌱 Seeding database (v0.2 position model)...");
 
-  // Wipe existing data (dev only)
+  // Wipe
   await prisma.auditLog.deleteMany();
   await prisma.payment.deleteMany();
+  await prisma.completedTrade.deleteMany();
   await prisma.transaction.deleteMany();
   await prisma.priceSnapshot.deleteMany();
+  // Detach client login users before deleting clients
+  await prisma.user.updateMany({
+    where: { linkedClientId: { not: null } },
+    data: { linkedClientId: null },
+  });
   await prisma.client.deleteMany();
   await prisma.user.deleteMany();
 
@@ -19,28 +25,27 @@ async function main() {
   const superadminPassword = process.env.SUPERADMIN_PASSWORD || "ChangeMe123!";
   const superadmin = await prisma.user.create({
     data: {
-      email: superadminEmail,
+      email: superadminEmail.toLowerCase(),
       passwordHash: await bcrypt.hash(superadminPassword, 10),
       role: "superadmin",
       name: "Super Admin",
     },
   });
-  console.log(`✓ Superadmin: ${superadmin.email} / ${superadminPassword}`);
+  console.log(`✓ Superadmin: ${superadmin.email}`);
 
-  // ---------- SAMPLE ADMIN ----------
-  const adminPassword = "Admin123!";
+  // ---------- ADMIN ----------
   const admin = await prisma.user.create({
     data: {
       email: "rajesh@firm.com",
-      passwordHash: await bcrypt.hash(adminPassword, 10),
+      passwordHash: await bcrypt.hash("Admin123!", 10),
       role: "admin",
       name: "Rajesh Sharma",
     },
   });
-  console.log(`✓ Admin: ${admin.email} / ${adminPassword}`);
+  console.log(`✓ Admin: ${admin.email}`);
 
-  // ---------- SAMPLE CLIENTS ----------
-  const client1 = await prisma.client.create({
+  // ---------- CLIENTS ----------
+  const amit = await prisma.client.create({
     data: {
       adminId: admin.id,
       name: "Amit Patel",
@@ -51,7 +56,7 @@ async function main() {
     },
   });
 
-  const client2 = await prisma.client.create({
+  const priya = await prisma.client.create({
     data: {
       adminId: admin.id,
       name: "Priya Singh",
@@ -62,170 +67,200 @@ async function main() {
     },
   });
 
-  // ---------- CLIENT LOGIN (read-only) ----------
-  const clientPassword = "Client123!";
-  const clientUser = await prisma.user.create({
+  // ---------- CLIENT LOGIN ----------
+  await prisma.user.create({
     data: {
       email: "amit@example.com",
-      passwordHash: await bcrypt.hash(clientPassword, 10),
+      passwordHash: await bcrypt.hash("Client123!", 10),
       role: "client",
       name: "Amit Patel",
-      linkedClientId: client1.id,
-    },
-  });
-  console.log(`✓ Client login: ${clientUser.email} / ${clientPassword}`);
-
-  // ---------- SAMPLE TRANSACTIONS ----------
-  // Amit Patel: buys RELIANCE and TCS, sells some RELIANCE (will realize a gain)
-  const now = new Date();
-  const daysAgo = (n: number) => new Date(now.getTime() - n * 86400000);
-
-  // BUY 100 RELIANCE @ 2400 (15 months ago — will be LTCG when sold)
-  await prisma.transaction.create({
-    data: {
-      clientId: client1.id,
-      symbol: "RELIANCE",
-      exchange: "NSE",
-      type: "buy",
-      quantity: 100,
-      pricePerShare: 2400,
-      tradeDate: daysAgo(450),
-      commissionAmount: 100 * 2400 * 0.005, // 0.5% = 1200
-      createdByUserId: admin.id,
-      notes: "Initial long-term position",
+      linkedClientId: amit.id,
     },
   });
 
-  // BUY 50 RELIANCE @ 2600 (3 months ago — STCG if sold)
-  await prisma.transaction.create({
-    data: {
-      clientId: client1.id,
-      symbol: "RELIANCE",
-      exchange: "NSE",
-      type: "buy",
-      quantity: 50,
-      pricePerShare: 2600,
-      tradeDate: daysAgo(90),
-      commissionAmount: 50 * 2600 * 0.005, // 650
-      createdByUserId: admin.id,
-    },
-  });
+  // ---------- BUY LOTS for Amit ----------
+  const now = Date.now();
+  const daysAgo = (n: number) => new Date(now - n * 86400000);
 
-  // SELL 80 RELIANCE @ 2850 (today) — FIFO matches against the LTCG lot
-  await prisma.transaction.create({
+  // TCS — two lots at different prices (will show weighted avg in holdings)
+  const tcsLot1 = await prisma.transaction.create({
     data: {
-      clientId: client1.id,
-      symbol: "RELIANCE",
-      exchange: "NSE",
-      type: "sell",
-      quantity: 80,
-      pricePerShare: 2850,
-      tradeDate: daysAgo(2),
-      commissionAmount: 80 * 2850 * 0.005, // 1140
-      createdByUserId: admin.id,
-      notes: "Partial exit — booking profit",
-    },
-  });
-
-  // BUY 200 TCS @ 3500 (6 months ago)
-  await prisma.transaction.create({
-    data: {
-      clientId: client1.id,
+      clientId: amit.id,
       symbol: "TCS",
       exchange: "NSE",
-      type: "buy",
-      quantity: 200,
+      quantity: 100,
+      remainingQty: 100,
       pricePerShare: 3500,
       tradeDate: daysAgo(180),
-      commissionAmount: 200 * 3500 * 0.005, // 3500
+      createdByUserId: admin.id,
+      notes: "Initial TCS position",
+    },
+  });
+
+  const tcsLot2 = await prisma.transaction.create({
+    data: {
+      clientId: amit.id,
+      symbol: "TCS",
+      exchange: "NSE",
+      quantity: 50,
+      remainingQty: 50,
+      pricePerShare: 3700,
+      tradeDate: daysAgo(90),
+      createdByUserId: admin.id,
+      notes: "Added on dip",
+    },
+  });
+
+  // RELIANCE — single lot
+  await prisma.transaction.create({
+    data: {
+      clientId: amit.id,
+      symbol: "RELIANCE",
+      exchange: "NSE",
+      quantity: 80,
+      remainingQty: 80,
+      pricePerShare: 2550,
+      tradeDate: daysAgo(120),
       createdByUserId: admin.id,
     },
   });
 
-  // Priya Singh: buys INFY and HDFC
-  await prisma.transaction.create({
+  // INFY — a lot that will be partially sold in the completed trade below
+  const infyLot = await prisma.transaction.create({
     data: {
-      clientId: client2.id,
+      clientId: amit.id,
       symbol: "INFY",
       exchange: "NSE",
-      type: "buy",
-      quantity: 150,
-      pricePerShare: 1450,
-      tradeDate: daysAgo(200),
-      commissionAmount: 25, // flat
+      quantity: 200,
+      remainingQty: 80, // 120 sold (see CompletedTrade below)
+      pricePerShare: 1380,
+      tradeDate: daysAgo(220),
+      createdByUserId: admin.id,
+    },
+  });
+
+  // ---------- COMPLETED TRADE for Amit ----------
+  // 120 INFY sold at 1520, commission 0.5% of trade value
+  {
+    const sellQty = 120;
+    const sellPrice = 1520;
+    const totalBuyCost = 120 * 1380;
+    const totalSellProceeds = sellQty * sellPrice;
+    const grossPnL = totalSellProceeds - totalBuyCost;
+    const commissionAmount = (totalSellProceeds * 0.5) / 100;
+    const netPnL = grossPnL - commissionAmount;
+    const matchedLots = [
+      {
+        buyTransactionId: infyLot.id,
+        buyDate: infyLot.tradeDate.toISOString(),
+        buyPrice: 1380,
+        qty: 120,
+      },
+    ];
+
+    await prisma.completedTrade.create({
+      data: {
+        clientId: amit.id,
+        symbol: "INFY",
+        exchange: "NSE",
+        sellDate: daysAgo(10),
+        sellQty,
+        sellPricePerShare: sellPrice,
+        avgBuyPrice: 1380,
+        totalBuyCost,
+        totalSellProceeds,
+        grossPnL,
+        commissionType: "percentage",
+        commissionValue: 0.5,
+        commissionAmount,
+        netPnL,
+        matchedLotsJson: JSON.stringify(matchedLots),
+        createdByUserId: admin.id,
+        notes: "Partial exit",
+      },
+    });
+  }
+
+  // ---------- BUY LOTS for Priya ----------
+  await prisma.transaction.create({
+    data: {
+      clientId: priya.id,
+      symbol: "HDFCBANK",
+      exchange: "NSE",
+      quantity: 75,
+      remainingQty: 75,
+      pricePerShare: 1620,
+      tradeDate: daysAgo(60),
       createdByUserId: admin.id,
     },
   });
 
   await prisma.transaction.create({
     data: {
-      clientId: client2.id,
-      symbol: "HDFCBANK",
+      clientId: priya.id,
+      symbol: "INFY",
       exchange: "NSE",
-      type: "buy",
-      quantity: 75,
-      pricePerShare: 1620,
-      tradeDate: daysAgo(60),
-      commissionAmount: 25,
+      quantity: 150,
+      remainingQty: 150,
+      pricePerShare: 1450,
+      tradeDate: daysAgo(200),
       createdByUserId: admin.id,
     },
   });
 
-  // ---------- SAMPLE PAYMENTS ----------
+  // ---------- PAYMENTS ----------
   await prisma.payment.create({
     data: {
-      clientId: client1.id,
+      clientId: amit.id,
       amount: 500000,
       direction: "in",
       status: "received",
-      date: daysAgo(460),
-      notes: "Initial capital deposit",
+      date: daysAgo(230),
+      notes: "Initial capital",
       createdByUserId: admin.id,
     },
   });
 
   await prisma.payment.create({
     data: {
-      clientId: client1.id,
-      amount: 228000,
+      clientId: amit.id,
+      amount: 181560,
       direction: "out",
       status: "received",
-      date: daysAgo(1),
-      notes: "Sell proceeds: 80 RELIANCE @ 2850",
+      date: daysAgo(9),
+      notes: "INFY sell proceeds",
       createdByUserId: admin.id,
     },
   });
 
   await prisma.payment.create({
     data: {
-      clientId: client2.id,
+      clientId: priya.id,
       amount: 350000,
       direction: "in",
       status: "pending",
       date: daysAgo(5),
-      notes: "Additional capital — pending bank confirmation",
+      notes: "Additional capital pending",
       createdByUserId: admin.id,
     },
   });
 
-  // ---------- CACHED PRICES (mock — real app fetches from Yahoo) ----------
+  // ---------- CACHED PRICES ----------
   const prices = [
-    { symbol: "RELIANCE", exchange: "NSE" as const, price: 2875 },
     { symbol: "TCS", exchange: "NSE" as const, price: 3680 },
-    { symbol: "INFY", exchange: "NSE" as const, price: 1520 },
+    { symbol: "RELIANCE", exchange: "NSE" as const, price: 2875 },
+    { symbol: "INFY", exchange: "NSE" as const, price: 1555 },
     { symbol: "HDFCBANK", exchange: "NSE" as const, price: 1695 },
   ];
-  for (const p of prices) {
-    await prisma.priceSnapshot.create({ data: p });
-  }
+  for (const p of prices) await prisma.priceSnapshot.create({ data: p });
 
   console.log("\n✅ Seed complete!\n");
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
   console.log("LOGIN CREDENTIALS");
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
   console.log(`Superadmin:  ${superadminEmail} / ${superadminPassword}`);
-  console.log(`Admin:       rajesh@firm.com / ${adminPassword}`);
-  console.log(`Client:      amit@example.com / ${clientPassword}`);
+  console.log(`Admin:       rajesh@firm.com / Admin123!`);
+  console.log(`Client:      amit@example.com / Client123!`);
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 }
 

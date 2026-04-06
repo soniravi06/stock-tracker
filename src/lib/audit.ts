@@ -6,7 +6,7 @@ type LogArgs = {
   actorRole: Role;
   onBehalfOfAdminId?: string | null;
   action: "create" | "update" | "soft_delete" | "restore";
-  entityType: "Client" | "Transaction" | "Payment" | "User";
+  entityType: "Client" | "Transaction" | "CompletedTrade" | "Payment" | "User";
   entityId: string;
   before?: unknown;
   after?: unknown;

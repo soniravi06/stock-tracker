@@ -1,7 +1,7 @@
 import { requireSession, scopedClientWhere } from "@/lib/access";
 import { prisma } from "@/lib/prisma";
 import { AppShell } from "@/components/AppShell";
-import { buildGainSummary } from "@/lib/fifo";
+import { buildHoldings } from "@/lib/fifo";
 import { getPrices } from "@/lib/prices";
 import { inr } from "@/lib/format";
 import Link from "next/link";
@@ -14,15 +14,16 @@ export default async function DashboardPage() {
     where,
     include: {
       transactions: { where: { deletedAt: null } },
+      completedTrades: { where: { deletedAt: null } },
       payments: { where: { deletedAt: null } },
     },
   });
 
-  // Pull unique symbols and fetch prices
+  // Pull unique symbols and fetch prices in parallel
   const symbolSet = new Set<string>();
   for (const c of clients) {
     for (const t of c.transactions) {
-      symbolSet.add(`${t.symbol}:${t.exchange}`);
+      if (t.remainingQty > 0) symbolSet.add(`${t.symbol}:${t.exchange}`);
     }
   }
   const priceItems = Array.from(symbolSet).map((s) => {
@@ -31,27 +32,35 @@ export default async function DashboardPage() {
   });
   const priceMap = await getPrices(priceItems);
 
-  // Aggregate
   let totalRealized = 0;
   let totalUnrealized = 0;
-  let totalSTCG = 0;
-  let totalLTCG = 0;
+  let totalCommission = 0;
   let totalPortfolioValue = 0;
   let pendingPayments = 0;
 
   const perClient = clients.map((c) => {
-    const summary = buildGainSummary(c.transactions, priceMap);
-    totalRealized += summary.totals.realizedTotal;
-    totalUnrealized += summary.totals.unrealizedTotal;
-    totalSTCG += summary.totals.realizedSTCG;
-    totalLTCG += summary.totals.realizedLTCG;
+    const holdings = buildHoldings(c.transactions);
 
     let portfolioValue = 0;
-    for (const h of summary.holdings) {
+    let unrealized = 0;
+    for (const h of holdings) {
       const px = priceMap.get(h.symbol);
-      if (px != null) portfolioValue += px * h.quantity;
+      if (px != null) {
+        portfolioValue += px * h.totalQty;
+        unrealized += (px - h.avgCostPerShare) * h.totalQty;
+      }
     }
     totalPortfolioValue += portfolioValue;
+    totalUnrealized += unrealized;
+
+    let realized = 0;
+    let commission = 0;
+    for (const t of c.completedTrades) {
+      realized += t.netPnL;
+      commission += t.commissionAmount;
+    }
+    totalRealized += realized;
+    totalCommission += commission;
 
     for (const p of c.payments) {
       if (p.status === "pending") pendingPayments += p.amount;
@@ -60,10 +69,10 @@ export default async function DashboardPage() {
     return {
       id: c.id,
       name: c.name,
-      holdingsCount: summary.holdings.length,
+      holdingsCount: holdings.length,
       portfolioValue,
-      realized: summary.totals.realizedTotal,
-      unrealized: summary.totals.unrealizedTotal,
+      realized,
+      unrealized,
     };
   });
 
@@ -78,53 +87,33 @@ export default async function DashboardPage() {
         </h1>
       </div>
 
-      {/* Stat cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1rem", marginBottom: "2rem" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem", marginBottom: "2rem" }}>
         <div className="glass stat-card">
           <div className="stat-label">Portfolio Value</div>
           <div className="stat-value">{inr(totalPortfolioValue)}</div>
         </div>
         <div className="glass stat-card">
-          <div className="stat-label">Unrealized Gain</div>
+          <div className="stat-label">Unrealized P&L</div>
           <div className={`stat-value ${totalUnrealized >= 0 ? "pos" : "neg"}`}>
             {inr(totalUnrealized)}
           </div>
         </div>
         <div className="glass stat-card">
-          <div className="stat-label">Realized Gain</div>
+          <div className="stat-label">Realized P&L (net)</div>
           <div className={`stat-value ${totalRealized >= 0 ? "pos" : "neg"}`}>
             {inr(totalRealized)}
           </div>
         </div>
         <div className="glass stat-card">
+          <div className="stat-label">Commission Paid</div>
+          <div className="stat-value" style={{ fontSize: "1.4rem" }}>{inr(totalCommission)}</div>
+        </div>
+        <div className="glass stat-card">
           <div className="stat-label">Pending Payments</div>
-          <div className="stat-value">{inr(pendingPayments)}</div>
+          <div className="stat-value" style={{ fontSize: "1.4rem" }}>{inr(pendingPayments)}</div>
         </div>
       </div>
 
-      {/* STCG/LTCG split */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "2rem" }}>
-        <div className="glass stat-card">
-          <div className="stat-label">STCG (Short-term)</div>
-          <div className={`stat-value ${totalSTCG >= 0 ? "pos" : "neg"}`} style={{ fontSize: "1.4rem" }}>
-            {inr(totalSTCG)}
-          </div>
-          <div style={{ fontSize: "0.7rem", color: "#9ca3af", marginTop: "0.25rem" }}>
-            Taxed at 20% (India, listed equity)
-          </div>
-        </div>
-        <div className="glass stat-card">
-          <div className="stat-label">LTCG (Long-term)</div>
-          <div className={`stat-value ${totalLTCG >= 0 ? "pos" : "neg"}`} style={{ fontSize: "1.4rem" }}>
-            {inr(totalLTCG)}
-          </div>
-          <div style={{ fontSize: "0.7rem", color: "#9ca3af", marginTop: "0.25rem" }}>
-            Taxed at 12.5% above ₹1.25L (India)
-          </div>
-        </div>
-      </div>
-
-      {/* Clients table */}
       <div className="glass" style={{ padding: "1.25rem 1.5rem", marginBottom: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h2 style={{ fontSize: "1.1rem", fontWeight: 600 }}>Clients</h2>
         {session.user.role !== "client" && (
