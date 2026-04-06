@@ -1,0 +1,166 @@
+// Stock Portfolio Tracker - Prisma Schema
+// Local: SQLite. Production: switch provider to "postgresql" and set DATABASE_URL to Supabase.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// =========================================================
+// ROLES: superadmin (one seeded), admin (created by super), client (read-only, created by admin)
+// =========================================================
+enum Role {
+  superadmin
+  admin
+  client
+}
+
+enum TxType {
+  buy
+  sell
+}
+
+enum Exchange {
+  NSE
+  BSE
+}
+
+enum CommissionType {
+  percentage
+  flat
+}
+
+enum PaymentDirection {
+  in
+  out
+}
+
+enum PaymentStatus {
+  pending
+  received
+}
+
+// =========================================================
+
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  passwordHash   String
+  role           Role
+  name           String?
+  // For client logins: which Client record this user represents (read-only scope)
+  linkedClientId String?   @unique
+  linkedClient   Client?   @relation("ClientLogin", fields: [linkedClientId], references: [id])
+  // Clients owned by this user (if admin)
+  clientsOwned   Client[]  @relation("AdminClients")
+  // Audit trail actorship
+  auditLogs      AuditLog[] @relation("Actor")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+}
+
+model Client {
+  id                      String         @id @default(cuid())
+  adminId                 String
+  admin                   User           @relation("AdminClients", fields: [adminId], references: [id])
+  name                    String
+  email                   String?
+  phone                   String?
+  // Default commission applied to all transactions for this client unless overridden
+  defaultCommissionType   CommissionType @default(percentage)
+  defaultCommissionValue  Float          @default(0.5) // 0.5% default
+  // Reverse relation for client-login user
+  loginUser               User?          @relation("ClientLogin")
+  transactions            Transaction[]
+  payments                Payment[]
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+  deletedAt               DateTime?
+
+  @@index([adminId])
+}
+
+model Transaction {
+  id                     String    @id @default(cuid())
+  clientId               String
+  client                 Client    @relation(fields: [clientId], references: [id])
+  symbol                 String    // e.g. "RELIANCE"
+  exchange               Exchange  @default(NSE)
+  type                   TxType
+  quantity               Float
+  pricePerShare          Float
+  tradeDate              DateTime
+  commissionAmount       Float     @default(0) // absolute INR amount, computed at entry time
+  notes                  String?
+  // Immutability: if this tx was reversed by a later correction, point to it
+  reversedByTransactionId String?  @unique
+  reversedBy             Transaction?  @relation("Reversal", fields: [reversedByTransactionId], references: [id])
+  reverses               Transaction?  @relation("Reversal")
+  createdByUserId        String
+  payments               Payment[]
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  deletedAt              DateTime?
+
+  @@index([clientId])
+  @@index([symbol])
+  @@index([tradeDate])
+}
+
+model Payment {
+  id              String           @id @default(cuid())
+  clientId        String
+  client          Client           @relation(fields: [clientId], references: [id])
+  transactionId   String?
+  transaction     Transaction?     @relation(fields: [transactionId], references: [id])
+  amount          Float
+  direction       PaymentDirection
+  status          PaymentStatus    @default(pending)
+  date            DateTime
+  notes           String?
+  createdByUserId String
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  deletedAt       DateTime?
+
+  @@index([clientId])
+  @@index([status])
+}
+
+// Cached live prices from Yahoo Finance (5-10 min TTL)
+model PriceSnapshot {
+  id         String   @id @default(cuid())
+  symbol     String
+  exchange   Exchange
+  price      Float
+  fetchedAt  DateTime @default(now())
+
+  @@unique([symbol, exchange])
+  @@index([fetchedAt])
+}
+
+// Immutable audit trail - every create/edit/soft-delete logged
+model AuditLog {
+  id                String   @id @default(cuid())
+  actorUserId       String
+  actor             User     @relation("Actor", fields: [actorUserId], references: [id])
+  actorRole         Role
+  // If a superadmin acted on an admin's data, record which admin
+  onBehalfOfAdminId String?
+  action            String   // "create" | "update" | "soft_delete" | "restore"
+  entityType        String   // "Client" | "Transaction" | "Payment" | "User"
+  entityId          String
+  beforeJson        String?  // JSON serialized
+  afterJson         String?  // JSON serialized
+  ipAddress         String?
+  createdAt         DateTime @default(now())
+
+  @@index([actorUserId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}

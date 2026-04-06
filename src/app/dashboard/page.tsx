@@ -1,0 +1,168 @@
+import { requireSession, scopedClientWhere } from "@/lib/access";
+import { prisma } from "@/lib/prisma";
+import { AppShell } from "@/components/AppShell";
+import { buildGainSummary } from "@/lib/fifo";
+import { getPrices } from "@/lib/prices";
+import { inr } from "@/lib/format";
+import Link from "next/link";
+
+export default async function DashboardPage() {
+  const session = await requireSession();
+  const where = await scopedClientWhere();
+
+  const clients = await prisma.client.findMany({
+    where,
+    include: {
+      transactions: { where: { deletedAt: null } },
+      payments: { where: { deletedAt: null } },
+    },
+  });
+
+  // Pull unique symbols and fetch prices
+  const symbolSet = new Set<string>();
+  for (const c of clients) {
+    for (const t of c.transactions) {
+      symbolSet.add(`${t.symbol}:${t.exchange}`);
+    }
+  }
+  const priceItems = Array.from(symbolSet).map((s) => {
+    const [symbol, exchange] = s.split(":");
+    return { symbol, exchange: exchange as "NSE" | "BSE" };
+  });
+  const priceMap = await getPrices(priceItems);
+
+  // Aggregate
+  let totalRealized = 0;
+  let totalUnrealized = 0;
+  let totalSTCG = 0;
+  let totalLTCG = 0;
+  let totalPortfolioValue = 0;
+  let pendingPayments = 0;
+
+  const perClient = clients.map((c) => {
+    const summary = buildGainSummary(c.transactions, priceMap);
+    totalRealized += summary.totals.realizedTotal;
+    totalUnrealized += summary.totals.unrealizedTotal;
+    totalSTCG += summary.totals.realizedSTCG;
+    totalLTCG += summary.totals.realizedLTCG;
+
+    let portfolioValue = 0;
+    for (const h of summary.holdings) {
+      const px = priceMap.get(h.symbol);
+      if (px != null) portfolioValue += px * h.quantity;
+    }
+    totalPortfolioValue += portfolioValue;
+
+    for (const p of c.payments) {
+      if (p.status === "pending") pendingPayments += p.amount;
+    }
+
+    return {
+      id: c.id,
+      name: c.name,
+      holdingsCount: summary.holdings.length,
+      portfolioValue,
+      realized: summary.totals.realizedTotal,
+      unrealized: summary.totals.unrealizedTotal,
+    };
+  });
+
+  return (
+    <AppShell role={session.user.role} userName={session.user.name || session.user.email} currentPath="/dashboard">
+      <div style={{ marginBottom: "2rem" }}>
+        <div style={{ fontSize: "0.75rem", color: "#7c5cff", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "0.5rem" }}>
+          {session.user.role === "superadmin" ? "Platform Overview" : "Your Dashboard"}
+        </div>
+        <h1 style={{ fontSize: "2rem", fontWeight: 700, letterSpacing: "-0.02em" }}>
+          Welcome back, {session.user.name?.split(" ")[0] || "there"}
+        </h1>
+      </div>
+
+      {/* Stat cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1rem", marginBottom: "2rem" }}>
+        <div className="glass stat-card">
+          <div className="stat-label">Portfolio Value</div>
+          <div className="stat-value">{inr(totalPortfolioValue)}</div>
+        </div>
+        <div className="glass stat-card">
+          <div className="stat-label">Unrealized Gain</div>
+          <div className={`stat-value ${totalUnrealized >= 0 ? "pos" : "neg"}`}>
+            {inr(totalUnrealized)}
+          </div>
+        </div>
+        <div className="glass stat-card">
+          <div className="stat-label">Realized Gain</div>
+          <div className={`stat-value ${totalRealized >= 0 ? "pos" : "neg"}`}>
+            {inr(totalRealized)}
+          </div>
+        </div>
+        <div className="glass stat-card">
+          <div className="stat-label">Pending Payments</div>
+          <div className="stat-value">{inr(pendingPayments)}</div>
+        </div>
+      </div>
+
+      {/* STCG/LTCG split */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "2rem" }}>
+        <div className="glass stat-card">
+          <div className="stat-label">STCG (Short-term)</div>
+          <div className={`stat-value ${totalSTCG >= 0 ? "pos" : "neg"}`} style={{ fontSize: "1.4rem" }}>
+            {inr(totalSTCG)}
+          </div>
+          <div style={{ fontSize: "0.7rem", color: "#9ca3af", marginTop: "0.25rem" }}>
+            Taxed at 20% (India, listed equity)
+          </div>
+        </div>
+        <div className="glass stat-card">
+          <div className="stat-label">LTCG (Long-term)</div>
+          <div className={`stat-value ${totalLTCG >= 0 ? "pos" : "neg"}`} style={{ fontSize: "1.4rem" }}>
+            {inr(totalLTCG)}
+          </div>
+          <div style={{ fontSize: "0.7rem", color: "#9ca3af", marginTop: "0.25rem" }}>
+            Taxed at 12.5% above ₹1.25L (India)
+          </div>
+        </div>
+      </div>
+
+      {/* Clients table */}
+      <div className="glass" style={{ padding: "1.25rem 1.5rem", marginBottom: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h2 style={{ fontSize: "1.1rem", fontWeight: 600 }}>Clients</h2>
+        {session.user.role !== "client" && (
+          <Link href="/clients/new" className="btn btn-primary">+ New Client</Link>
+        )}
+      </div>
+
+      <div className="glass" style={{ overflow: "hidden" }}>
+        <table className="data">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Holdings</th>
+              <th style={{ textAlign: "right" }}>Value</th>
+              <th style={{ textAlign: "right" }}>Realized</th>
+              <th style={{ textAlign: "right" }}>Unrealized</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {perClient.length === 0 && (
+              <tr><td colSpan={6} style={{ textAlign: "center", color: "#9ca3af", padding: "2rem" }}>No clients yet.</td></tr>
+            )}
+            {perClient.map((c) => (
+              <tr key={c.id}>
+                <td style={{ fontWeight: 600 }}>{c.name}</td>
+                <td>{c.holdingsCount}</td>
+                <td style={{ textAlign: "right" }}>{inr(c.portfolioValue)}</td>
+                <td style={{ textAlign: "right" }} className={c.realized >= 0 ? "pos" : "neg"}>{inr(c.realized)}</td>
+                <td style={{ textAlign: "right" }} className={c.unrealized >= 0 ? "pos" : "neg"}>{inr(c.unrealized)}</td>
+                <td style={{ textAlign: "right" }}>
+                  <Link href={`/clients/${c.id}`} className="btn btn-ghost" style={{ fontSize: "0.75rem", padding: "0.35rem 0.75rem" }}>Open →</Link>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </AppShell>
+  );
+}
