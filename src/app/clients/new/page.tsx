@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { AppShell } from "@/components/AppShell";
 import { writeAudit } from "@/lib/audit";
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import bcrypt from "bcryptjs";
 
 async function createClientAction(formData: FormData) {
@@ -69,6 +70,9 @@ async function createClientAction(formData: FormData) {
     }
   }
 
+  revalidatePath("/clients");
+  revalidatePath("/dashboard");
+  revalidatePath("/audit");
   redirect(`/clients/${client.id}`);
 }
 

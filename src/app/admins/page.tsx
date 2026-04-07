@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { AppShell } from "@/components/AppShell";
 import { writeAudit } from "@/lib/audit";
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import bcrypt from "bcryptjs";
 import { fmtDate } from "@/lib/format";
 
@@ -37,6 +38,9 @@ async function createAdminAction(formData: FormData) {
     after: { email: u.email, role: u.role, name: u.name },
   });
 
+  revalidatePath("/admins");
+  revalidatePath("/dashboard");
+  revalidatePath("/audit");
   redirect("/admins");
 }
 

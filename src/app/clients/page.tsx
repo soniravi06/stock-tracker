@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { requireSession, scopedClientWhere } from "@/lib/access";
 import { prisma } from "@/lib/prisma";
 import { AppShell } from "@/components/AppShell";

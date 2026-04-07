@@ -140,14 +140,17 @@ async function main() {
   });
 
   // ---------- COMPLETED TRADE for Amit ----------
-  // 120 INFY sold at 1520, commission 0.5% of trade value
+  // 120 INFY sold at 1520, commission 0.5% of gross P&L (Interpretation A: signed)
+  // grossPnL = 182,400 - 165,600 = 16,800
+  // commissionAmount = 16,800 * 0.5% = 84
+  // netPnL = 16,800 - 84 = 16,716
   {
     const sellQty = 120;
     const sellPrice = 1520;
     const totalBuyCost = 120 * 1380;
     const totalSellProceeds = sellQty * sellPrice;
     const grossPnL = totalSellProceeds - totalBuyCost;
-    const commissionAmount = (totalSellProceeds * 0.5) / 100;
+    const commissionAmount = (grossPnL * 0.5) / 100;
     const netPnL = grossPnL - commissionAmount;
     const matchedLots = [
       {

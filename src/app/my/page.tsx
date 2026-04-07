@@ -84,7 +84,7 @@ export default async function MyPortfolioPage() {
         </div>
         <div className="glass stat-card">
           <div className="stat-label">Commission Paid</div>
-          <div className="stat-value" style={{ fontSize: "1.4rem" }}>{inr(totalCommission)}</div>
+          <div className="stat-value commission" style={{ fontSize: "1.4rem" }}>{inr(totalCommission)}</div>
         </div>
       </div>
 
