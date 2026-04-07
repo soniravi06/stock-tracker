@@ -96,7 +96,7 @@ export function CompletedTradesTable({
                     <td style={{ textAlign: "right" }}>{inr(t.avgBuyPrice)}</td>
                     <td style={{ textAlign: "right" }}>{inr(t.sellPricePerShare)}</td>
                     <td style={{ textAlign: "right" }} className={t.grossPnL >= 0 ? "pos" : "neg"}>{inr(t.grossPnL)}</td>
-                    <td style={{ textAlign: "right", color: "#9ca3af" }}>
+                    <td style={{ textAlign: "right", color: "#f59e0b" }}>
                       {inr(t.commissionAmount)}
                       <div style={{ fontSize: "0.65rem" }}>
                         ({t.commissionType === "percentage" ? `${t.commissionValue}%` : `₹${t.commissionValue} flat`})
@@ -180,9 +180,9 @@ function EditTradeModal({ trade, onClose }: { trade: CompletedTrade; onClose: ()
   const price = parseFloat(sellPrice) || 0;
   const cv = parseFloat(commissionValue) || 0;
   const proceeds = trade.sellQty * price;
-  const commission = commissionType === "percentage" ? (proceeds * cv) / 100 : cv;
   const totalBuyCost = trade.avgBuyPrice * trade.sellQty;
   const grossPnL = proceeds - totalBuyCost;
+  const commission = commissionType === "percentage" ? (grossPnL * cv) / 100 : cv;
   const netPnL = grossPnL - commission;
 
   return (
@@ -224,7 +224,7 @@ function EditTradeModal({ trade, onClose }: { trade: CompletedTrade; onClose: ()
           <div style={{ padding: "0.85rem", background: "rgba(255,255,255,0.03)", borderRadius: 10, marginBottom: "1rem", fontSize: "0.8rem" }}>
             <Row label="Sale Proceeds" value={inr(proceeds)} />
             <Row label="Buy Cost" value={`− ${inr(totalBuyCost)}`} />
-            <Row label="Commission" value={`− ${inr(commission)}`} />
+            <Row label="Commission" value={`− ${inr(commission)}`} valueClass="commission" />
             <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", margin: "0.5rem 0" }}></div>
             <Row label="Net P&L" value={inr(netPnL)} valueClass={netPnL >= 0 ? "pos" : "neg"} bold />
           </div>

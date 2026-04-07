@@ -72,14 +72,16 @@ export function planFifoSell(
 }
 
 /**
- * Compute commission in INR from type + value + trade value.
+ * Compute commission in INR from type + value + gross P&L.
+ * For percentage: commission = grossPnL * value / 100 (signed — negative on losses).
+ * For flat: fixed INR amount regardless of P&L direction.
  */
 export function computeCommission(
   type: "percentage" | "flat",
   value: number,
-  tradeValue: number
+  grossPnL: number
 ): number {
-  if (type === "percentage") return (tradeValue * value) / 100;
+  if (type === "percentage") return (grossPnL * value) / 100;
   return value;
 }
 

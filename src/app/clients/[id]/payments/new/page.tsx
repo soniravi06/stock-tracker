@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { AppShell } from "@/components/AppShell";
 import { writeAudit } from "@/lib/audit";
 import { redirect, notFound } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import Link from "next/link";
 
 async function createPaymentAction(formData: FormData) {
@@ -44,6 +45,10 @@ async function createPaymentAction(formData: FormData) {
     after: p,
   });
 
+  revalidatePath(`/clients/${clientId}`);
+  revalidatePath("/clients");
+  revalidatePath("/dashboard");
+  revalidatePath("/audit");
   redirect(`/clients/${clientId}`);
 }
 

@@ -216,9 +216,9 @@ function SellModal({
   const price = parseFloat(sellPrice) || 0;
   const cv = parseFloat(commissionValue) || 0;
   const proceeds = qty * price;
-  const commission = commissionType === "percentage" ? (proceeds * cv) / 100 : cv;
   const grossBuyCost = qty * holding.avgCostPerShare;
   const grossPnL = proceeds - grossBuyCost;
+  const commission = commissionType === "percentage" ? (grossPnL * cv) / 100 : cv;
   const netPnL = grossPnL - commission;
 
   return (
@@ -278,7 +278,7 @@ function SellModal({
         <div style={{ padding: "0.85rem", background: "rgba(255,255,255,0.03)", borderRadius: 10, marginBottom: "1rem", fontSize: "0.8rem" }}>
           <Row label="Sale Proceeds" value={inr(proceeds)} />
           <Row label="Buy Cost" value={`− ${inr(grossBuyCost)}`} />
-          <Row label="Commission" value={`− ${inr(commission)}`} />
+          <Row label="Commission" value={`− ${inr(commission)}`} valueClass="commission" />
           <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", margin: "0.5rem 0" }}></div>
           <Row
             label="Net P&L"

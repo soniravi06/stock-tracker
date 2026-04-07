@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { requireSession, scopedClientWhere } from "@/lib/access";
 import { prisma } from "@/lib/prisma";
 import { AppShell } from "@/components/AppShell";
@@ -106,7 +108,7 @@ export default async function DashboardPage() {
         </div>
         <div className="glass stat-card">
           <div className="stat-label">Commission Paid</div>
-          <div className="stat-value" style={{ fontSize: "1.4rem" }}>{inr(totalCommission)}</div>
+          <div className="stat-value commission" style={{ fontSize: "1.4rem" }}>{inr(totalCommission)}</div>
         </div>
         <div className="glass stat-card">
           <div className="stat-label">Pending Payments</div>

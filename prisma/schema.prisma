@@ -180,6 +180,7 @@ model AuditLog {
   entityId          String
   beforeJson        String?
   afterJson         String?
+  summary           String?
   ipAddress         String?
   createdAt         DateTime @default(now())
 
