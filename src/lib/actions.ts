@@ -39,8 +39,8 @@ export async function sellFromHoldingAction(formData: FormData) {
   if (plan.error) throw new Error(plan.error);
 
   const totalSellProceeds = sellQty * sellPrice;
-  const commissionAmount = computeCommission(commissionType, commissionValue, totalSellProceeds);
   const grossPnL = totalSellProceeds - plan.totalBuyCost;
+  const commissionAmount = computeCommission(commissionType, commissionValue, grossPnL);
   const netPnL = grossPnL - commissionAmount;
 
   // Apply as a transaction: decrement lots + create completed trade
@@ -85,6 +85,10 @@ export async function sellFromHoldingAction(formData: FormData) {
   });
 
   revalidatePath(`/clients/${clientId}`);
+  revalidatePath("/clients");
+  revalidatePath("/dashboard");
+  revalidatePath("/my");
+  revalidatePath("/audit");
 }
 
 // ============================================================
@@ -110,8 +114,8 @@ export async function editCompletedTradeAction(formData: FormData) {
 
   // Recompute
   const totalSellProceeds = existing.sellQty * sellPrice;
-  const commissionAmount = computeCommission(commissionType, commissionValue, totalSellProceeds);
   const grossPnL = totalSellProceeds - existing.totalBuyCost;
+  const commissionAmount = computeCommission(commissionType, commissionValue, grossPnL);
   const netPnL = grossPnL - commissionAmount;
 
   const updated = await prisma.completedTrade.update({
@@ -141,6 +145,10 @@ export async function editCompletedTradeAction(formData: FormData) {
   });
 
   revalidatePath(`/clients/${existing.clientId}`);
+  revalidatePath("/clients");
+  revalidatePath("/dashboard");
+  revalidatePath("/my");
+  revalidatePath("/audit");
 }
 
 // ============================================================
@@ -188,6 +196,10 @@ export async function deleteCompletedTradeAction(formData: FormData) {
   });
 
   revalidatePath(`/clients/${trade.clientId}`);
+  revalidatePath("/clients");
+  revalidatePath("/dashboard");
+  revalidatePath("/my");
+  revalidatePath("/audit");
 }
 
 // ============================================================
@@ -239,6 +251,9 @@ export async function editBuyLotAction(formData: FormData) {
   });
 
   revalidatePath(`/clients/${existing.clientId}`);
+  revalidatePath("/clients");
+  revalidatePath("/dashboard");
+  revalidatePath("/audit");
 }
 
 // ============================================================
@@ -278,4 +293,7 @@ export async function deleteBuyLotAction(formData: FormData) {
   });
 
   revalidatePath(`/clients/${existing.clientId}`);
+  revalidatePath("/clients");
+  revalidatePath("/dashboard");
+  revalidatePath("/audit");
 }

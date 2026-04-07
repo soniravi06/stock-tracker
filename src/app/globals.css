@@ -117,6 +117,7 @@ table.data tr:hover td { background: rgba(255,255,255,0.02); }
 
 .pos { color: #86efac; }
 .neg { color: #fca5a5; }
+.commission { color: #f59e0b; }
 
 .stat-card {
   padding: 1.25rem 1.5rem;
