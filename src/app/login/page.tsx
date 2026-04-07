@@ -45,7 +45,7 @@ export default function LoginPage({
           </button>
         </form>
 
-        <div style={{ marginTop: "2rem", padding: "1rem", background: "rgba(124, 92, 255, 0.08)", borderRadius: 10, border: "1px solid rgba(124, 92, 255, 0.2)" }}>
+        {/*<div style={{ marginTop: "2rem", padding: "1rem", background: "rgba(124, 92, 255, 0.08)", borderRadius: 10, border: "1px solid rgba(124, 92, 255, 0.2)" }}>
           <div style={{ fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.08em", color: "#a78bfa", marginBottom: "0.5rem", fontWeight: 600 }}>
             Demo credentials
           </div>
@@ -54,7 +54,7 @@ export default function LoginPage({
             <div>Admin: rajesh@firm.com / Admin123!</div>
             <div>Client: amit@example.com / Client123!</div>
           </div>
-        </div>
+</div> */}
       </div>
     </div>
   );

@@ -83,7 +83,7 @@ export default async function DashboardPage() {
           {session.user.role === "superadmin" ? "Platform Overview" : "Your Dashboard"}
         </div>
         <h1 style={{ fontSize: "2rem", fontWeight: 700, letterSpacing: "-0.02em" }}>
-          Welcome back, {session.user.name?.split(" ")[0] || "there"}
+          Welcome Back, {session.user.name?.split(" ")[0] || "there"}
         </h1>
       </div>
 
