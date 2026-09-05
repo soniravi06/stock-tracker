@@ -418,3 +418,47 @@ export async function deletePaymentAction(formData: FormData) {
 
   revalidatePaymentPaths(payment.clientId);
 }
+
+// ============================================================
+// UPDATE a client — details + default commission
+// ============================================================
+export async function updateClientAction(formData: FormData) {
+  const session = await requireSession();
+  if (session.user.role === "client") throw new Error("read-only");
+
+  const clientId = String(formData.get("clientId"));
+  const client = await getAuthorizedClient(clientId);
+  if (!client) throw new Error("client not found");
+
+  const name = String(formData.get("name") || "").trim();
+  const email = String(formData.get("email") || "").trim() || null;
+  const phone = String(formData.get("phone") || "").trim() || null;
+  const defaultCommissionType = String(formData.get("defaultCommissionType") || "percentage") as "percentage" | "flat";
+  const defaultCommissionValue = parseFloat(String(formData.get("defaultCommissionValue") || "0"));
+
+  if (!name) throw new Error("name is required");
+  if (!(defaultCommissionValue >= 0)) throw new Error("invalid commission value");
+
+  const updated = await prisma.client.update({
+    where: { id: clientId },
+    data: { name, email, phone, defaultCommissionType, defaultCommissionValue },
+  });
+
+  await writeAudit({
+    actorUserId: session.user.id,
+    actorRole: session.user.role,
+    onBehalfOfAdminId: session.user.role === "superadmin" ? client.adminId : null,
+    action: "update",
+    entityType: "Client",
+    entityId: clientId,
+    before: client,
+    after: updated,
+  });
+
+  revalidatePath(`/clients/${clientId}`);
+  revalidatePath(`/clients/${clientId}/edit`);
+  revalidatePath("/clients");
+  revalidatePath("/dashboard");
+  revalidatePath("/my");
+  revalidatePath("/audit");
+}

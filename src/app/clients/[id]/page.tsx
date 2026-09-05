@@ -85,6 +85,7 @@ export default async function ClientDetailPage({
             <div style={{ display: "flex", gap: "0.5rem" }}>
               <Link href={`/clients/${id}/buy/new`} className="btn btn-primary">+ Buy</Link>
               <Link href={`/clients/${id}/payments/new`} className="btn btn-ghost">+ Payment</Link>
+              <Link href={`/clients/${id}/edit`} className="btn btn-ghost">Edit</Link>
             </div>
           )}
         </div>

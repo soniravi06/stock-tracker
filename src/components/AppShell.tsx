@@ -28,6 +28,7 @@ export function AppShell({
           { href: "/clients", label: "All Clients" },
           { href: "/transactions", label: "Transactions" },
           { href: "/payments", label: "Payments" },
+          { href: "/reports/commission", label: "Commission" },
           { href: "/audit", label: "Audit Log" },
         ]
       : role === "admin"
@@ -36,6 +37,7 @@ export function AppShell({
           { href: "/clients", label: "Clients" },
           { href: "/transactions", label: "Transactions" },
           { href: "/payments", label: "Payments" },
+          { href: "/reports/commission", label: "Commission" },
           { href: "/audit", label: "Audit Log" },
         ]
       : [
