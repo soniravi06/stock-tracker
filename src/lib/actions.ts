@@ -297,3 +297,124 @@ export async function deleteBuyLotAction(formData: FormData) {
   revalidatePath("/dashboard");
   revalidatePath("/audit");
 }
+
+// ============================================================
+// Helper: authorize a payment and return it + its client
+// ============================================================
+async function getAuthorizedPayment(paymentId: string) {
+  const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
+  if (!payment || payment.deletedAt) return null;
+  const client = await getAuthorizedClient(payment.clientId);
+  if (!client) return null;
+  return { payment, client };
+}
+
+function revalidatePaymentPaths(clientId: string) {
+  revalidatePath("/payments");
+  revalidatePath(`/clients/${clientId}`);
+  revalidatePath("/clients");
+  revalidatePath("/dashboard");
+  revalidatePath("/my");
+  revalidatePath("/audit");
+}
+
+// ============================================================
+// MARK a payment as received
+// ============================================================
+export async function markPaymentReceivedAction(formData: FormData) {
+  const session = await requireSession();
+  if (session.user.role === "client") throw new Error("read-only");
+
+  const paymentId = String(formData.get("paymentId"));
+  const found = await getAuthorizedPayment(paymentId);
+  if (!found) throw new Error("payment not found");
+  const { payment, client } = found;
+
+  const updated = await prisma.payment.update({
+    where: { id: paymentId },
+    data: { status: "received" },
+  });
+
+  await writeAudit({
+    actorUserId: session.user.id,
+    actorRole: session.user.role,
+    onBehalfOfAdminId: session.user.role === "superadmin" ? client.adminId : null,
+    action: "update",
+    entityType: "Payment",
+    entityId: paymentId,
+    before: payment,
+    after: updated,
+  });
+
+  revalidatePaymentPaths(payment.clientId);
+}
+
+// ============================================================
+// EDIT a payment
+// ============================================================
+export async function editPaymentAction(formData: FormData) {
+  const session = await requireSession();
+  if (session.user.role === "client") throw new Error("read-only");
+
+  const paymentId = String(formData.get("paymentId"));
+  const found = await getAuthorizedPayment(paymentId);
+  if (!found) throw new Error("payment not found");
+  const { payment, client } = found;
+
+  const amount = parseFloat(String(formData.get("amount")));
+  const direction = String(formData.get("direction")) as "in" | "out";
+  const status = String(formData.get("status")) as "pending" | "received";
+  const date = new Date(String(formData.get("date")));
+  const notes = String(formData.get("notes") || "").trim() || null;
+
+  if (!(amount > 0)) throw new Error("invalid amount");
+
+  const updated = await prisma.payment.update({
+    where: { id: paymentId },
+    data: { amount, direction, status, date, notes },
+  });
+
+  await writeAudit({
+    actorUserId: session.user.id,
+    actorRole: session.user.role,
+    onBehalfOfAdminId: session.user.role === "superadmin" ? client.adminId : null,
+    action: "update",
+    entityType: "Payment",
+    entityId: paymentId,
+    before: payment,
+    after: updated,
+  });
+
+  revalidatePaymentPaths(payment.clientId);
+}
+
+// ============================================================
+// DELETE (soft) a payment
+// ============================================================
+export async function deletePaymentAction(formData: FormData) {
+  const session = await requireSession();
+  if (session.user.role === "client") throw new Error("read-only");
+
+  const paymentId = String(formData.get("paymentId"));
+  const found = await getAuthorizedPayment(paymentId);
+  if (!found) throw new Error("payment not found");
+  const { payment, client } = found;
+
+  const updated = await prisma.payment.update({
+    where: { id: paymentId },
+    data: { deletedAt: new Date() },
+  });
+
+  await writeAudit({
+    actorUserId: session.user.id,
+    actorRole: session.user.role,
+    onBehalfOfAdminId: session.user.role === "superadmin" ? client.adminId : null,
+    action: "soft_delete",
+    entityType: "Payment",
+    entityId: paymentId,
+    before: payment,
+    after: updated,
+  });
+
+  revalidatePaymentPaths(payment.clientId);
+}

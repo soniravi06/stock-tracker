@@ -26,12 +26,16 @@ export function AppShell({
           { href: "/dashboard", label: "Overview" },
           { href: "/admins", label: "Admins" },
           { href: "/clients", label: "All Clients" },
+          { href: "/transactions", label: "Transactions" },
+          { href: "/payments", label: "Payments" },
           { href: "/audit", label: "Audit Log" },
         ]
       : role === "admin"
       ? [
           { href: "/dashboard", label: "Dashboard" },
           { href: "/clients", label: "Clients" },
+          { href: "/transactions", label: "Transactions" },
+          { href: "/payments", label: "Payments" },
           { href: "/audit", label: "Audit Log" },
         ]
       : [
