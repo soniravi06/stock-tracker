@@ -9,6 +9,21 @@
 
 import type { Transaction } from "@prisma/client";
 
+// The subset of Transaction fields that buildHoldings actually reads.
+// Accepting a structural subset lets callers pass either full rows or
+// narrowly-`select`ed rows (e.g. the dashboard's optimized query).
+export type HoldingLot = Pick<
+  Transaction,
+  | "id"
+  | "symbol"
+  | "exchange"
+  | "quantity"
+  | "remainingQty"
+  | "pricePerShare"
+  | "tradeDate"
+  | "deletedAt"
+>;
+
 export type LotMatch = {
   buyTransactionId: string;
   buyDate: string; // ISO
@@ -103,7 +118,7 @@ export type Holding = {
 /**
  * Aggregate open lots into holdings per symbol.
  */
-export function buildHoldings(lots: Transaction[]): Holding[] {
+export function buildHoldings(lots: HoldingLot[]): Holding[] {
   const bySymbol = new Map<string, Holding>();
 
   for (const lot of lots) {
