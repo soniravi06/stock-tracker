@@ -7,6 +7,8 @@ import { buildHoldings } from "@/lib/fifo";
 import { getPrices } from "@/lib/prices";
 import { inr } from "@/lib/format";
 import Link from "next/link";
+import { DashboardCharts } from "@/components/DashboardCharts";
+import { RefreshPricesButton } from "@/components/RefreshPricesButton";
 
 export default async function DashboardPage() {
   const session = await requireSession();
@@ -14,10 +16,30 @@ export default async function DashboardPage() {
 
   const clients = await prisma.client.findMany({
     where,
-    include: {
-      transactions: { where: { deletedAt: null } },
-      completedTrades: { where: { deletedAt: null } },
-      payments: { where: { deletedAt: null } },
+    select: {
+      id: true,
+      name: true,
+      transactions: {
+        where: { deletedAt: null },
+        select: {
+          id: true,
+          symbol: true,
+          exchange: true,
+          quantity: true,
+          remainingQty: true,
+          pricePerShare: true,
+          tradeDate: true,
+          deletedAt: true,
+        },
+      },
+      completedTrades: {
+        where: { deletedAt: null },
+        select: { netPnL: true, commissionAmount: true },
+      },
+      payments: {
+        where: { deletedAt: null },
+        select: { amount: true, status: true },
+      },
     },
   });
 
@@ -40,6 +62,9 @@ export default async function DashboardPage() {
   let totalPortfolioValue = 0;
   let pendingPayments = 0;
 
+  // Aggregate holdings across all clients for the top-holdings chart
+  const holdingsBySymbol = new Map<string, number>();
+
   const perClient = clients.map((c) => {
     const holdings = buildHoldings(c.transactions);
 
@@ -48,8 +73,10 @@ export default async function DashboardPage() {
     for (const h of holdings) {
       const px = priceMap.get(h.symbol);
       if (px != null) {
-        portfolioValue += px * h.totalQty;
+        const mv = px * h.totalQty;
+        portfolioValue += mv;
         unrealized += (px - h.avgCostPerShare) * h.totalQty;
+        holdingsBySymbol.set(h.symbol, (holdingsBySymbol.get(h.symbol) || 0) + mv);
       }
     }
     totalPortfolioValue += portfolioValue;
@@ -78,15 +105,34 @@ export default async function DashboardPage() {
     };
   });
 
+  // Chart datasets
+  const clientValues = perClient
+    .map((c) => ({ name: c.name, value: Math.round(c.portfolioValue) }))
+    .filter((c) => c.value > 0)
+    .sort((a, b) => b.value - a.value);
+
+  const pnlSplit = [
+    { name: "Realized", value: Math.round(totalRealized) },
+    { name: "Unrealized", value: Math.round(totalUnrealized) },
+  ];
+
+  const topHoldings = Array.from(holdingsBySymbol.entries())
+    .map(([symbol, value]) => ({ symbol, value: Math.round(value) }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 5);
+
   return (
     <AppShell role={session.user.role} userName={session.user.name || session.user.email} currentPath="/dashboard">
       <div style={{ marginBottom: "2rem" }}>
         <div style={{ fontSize: "0.75rem", color: "#7c5cff", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "0.5rem" }}>
           {session.user.role === "superadmin" ? "Platform Overview" : "Your Dashboard"}
         </div>
-        <h1 style={{ fontSize: "2rem", fontWeight: 700, letterSpacing: "-0.02em" }}>
-          Welcome Back, {session.user.name?.split(" ")[0] || "there"}
-        </h1>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
+          <h1 style={{ fontSize: "2rem", fontWeight: 700, letterSpacing: "-0.02em" }}>
+            Welcome Back, {session.user.name?.split(" ")[0] || "there"}
+          </h1>
+          <RefreshPricesButton />
+        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem", marginBottom: "2rem" }}>
@@ -115,6 +161,8 @@ export default async function DashboardPage() {
           <div className="stat-value" style={{ fontSize: "1.4rem" }}>{inr(pendingPayments)}</div>
         </div>
       </div>
+
+      <DashboardCharts clientValues={clientValues} pnlSplit={pnlSplit} topHoldings={topHoldings} />
 
       <div className="glass" style={{ padding: "1.25rem 1.5rem", marginBottom: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h2 style={{ fontSize: "1.1rem", fontWeight: 600 }}>Clients</h2>

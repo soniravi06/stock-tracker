@@ -103,6 +103,8 @@ model Transaction {
   @@index([symbol])
   @@index([tradeDate])
   @@index([deletedAt])
+  @@index([clientId, deletedAt])
+  @@index([clientId, symbol, deletedAt])
 }
 
 // A completed sell event. May have consumed multiple buy lots (FIFO).
@@ -138,6 +140,7 @@ model CompletedTrade {
   @@index([symbol])
   @@index([sellDate])
   @@index([deletedAt])
+  @@index([clientId, deletedAt])
 }
 
 model Payment {
@@ -156,6 +159,7 @@ model Payment {
 
   @@index([clientId])
   @@index([status])
+  @@index([clientId, deletedAt])
 }
 
 model PriceSnapshot {

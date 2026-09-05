@@ -8,6 +8,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { HoldingsTable } from "@/components/HoldingsTable";
 import { CompletedTradesTable } from "@/components/CompletedTradesTable";
+import { RefreshPricesButton } from "@/components/RefreshPricesButton";
 
 export default async function ClientDetailPage({
   params,
@@ -81,13 +82,17 @@ export default async function ClientDetailPage({
                 : `₹${client.defaultCommissionValue} flat`}
             </div>
           </div>
-          {canEdit && (
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-              <Link href={`/clients/${id}/buy/new`} className="btn btn-primary">+ Buy</Link>
-              <Link href={`/clients/${id}/payments/new`} className="btn btn-ghost">+ Payment</Link>
-              <Link href={`/clients/${id}/edit`} className="btn btn-ghost">Edit</Link>
-            </div>
-          )}
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            <RefreshPricesButton clientId={id} />
+            {canEdit && (
+              <>
+                <Link href={`/clients/${id}/buy/new`} className="btn btn-primary">+ Buy</Link>
+                <Link href={`/clients/${id}/import`} className="btn btn-ghost">Import CSV</Link>
+                <Link href={`/clients/${id}/payments/new`} className="btn btn-ghost">+ Payment</Link>
+                <Link href={`/clients/${id}/edit`} className="btn btn-ghost">Edit</Link>
+              </>
+            )}
+          </div>
         </div>
       </div>
 

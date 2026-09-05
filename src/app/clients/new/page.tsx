@@ -21,9 +21,18 @@ async function createClientAction(formData: FormData) {
 
   if (!name) return;
 
-  // Superadmin can create under any admin; default to self (which shouldn't happen
-  // for superadmin without specifying, so in simple mode we require super to act as an admin too)
-  const adminId = session.user.role === "admin" ? session.user.id : session.user.id;
+  // Determine owning admin. Admins always own their own clients.
+  // Superadmin picks an admin from the form (act-as-admin); fall back to self.
+  let adminId = session.user.id;
+  if (session.user.role === "superadmin") {
+    const chosen = String(formData.get("adminId") || "").trim();
+    if (chosen) {
+      const adminUser = await prisma.user.findFirst({
+        where: { id: chosen, role: "admin", deletedAt: null },
+      });
+      if (adminUser) adminId = adminUser.id;
+    }
+  }
 
   const client = await prisma.client.create({
     data: {
@@ -80,6 +89,16 @@ export default async function NewClientPage() {
   const session = await requireSession();
   if (session.user.role === "client") redirect("/my");
 
+  // Superadmin can assign the new client to any admin (act-as-admin).
+  const isSuper = session.user.role === "superadmin";
+  const admins = isSuper
+    ? await prisma.user.findMany({
+        where: { role: "admin", deletedAt: null },
+        select: { id: true, name: true, email: true },
+        orderBy: { name: "asc" },
+      })
+    : [];
+
   return (
     <AppShell role={session.user.role} userName={session.user.name || session.user.email} currentPath="/clients">
       <div style={{ marginBottom: "2rem" }}>
@@ -89,6 +108,21 @@ export default async function NewClientPage() {
 
       <form action={createClientAction} className="glass" style={{ padding: "2rem", maxWidth: 720, display: "flex", flexDirection: "column", gap: "1.25rem" }}>
         <h2 style={{ fontSize: "1rem", fontWeight: 600, color: "#a78bfa" }}>Client Details</h2>
+
+        {isSuper && (
+          <div>
+            <label className="label">Assign to Admin *</label>
+            <select className="select" name="adminId" required defaultValue="">
+              <option value="" disabled>Select an admin…</option>
+              {admins.map((a) => (
+                <option key={a.id} value={a.id}>{a.name || a.email}</option>
+              ))}
+            </select>
+            <p style={{ fontSize: "0.75rem", color: "#9ca3af", marginTop: "0.35rem" }}>
+              As superadmin, choose which admin owns this client.
+            </p>
+          </div>
+        )}
 
         <div>
           <label className="label">Name *</label>

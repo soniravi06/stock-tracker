@@ -5,11 +5,14 @@ A multi-tenant stock portfolio accounting app for Indian markets (NSE/BSE).
 **Features**
 - 3-tier roles: Superadmin → Admin → Client (read-only)
 - Multi-client portfolio tracking per admin
-- FIFO realized gain calculation with automatic STCG / LTCG classification (India: 12-month rule)
-- Per-client default commission (percentage or flat) with per-transaction override
-- Commissions folded into cost basis and sell proceeds (correct tax treatment)
-- Unrealized gains using live Yahoo Finance prices (NSE `.NS` / BSE `.BO`, cached 10 min)
-- Payments tracking (pending / received, deposits / withdrawals)
+- Position-based model: buy lots with FIFO matching on sell → CompletedTrade
+- Per-client default commission (percentage of gross P&L, signed, or flat ₹) with per-trade override
+- Unrealized gains using live Yahoo Finance prices (NSE `.NS` / BSE `.BO`, cached 10 min, manual refresh)
+- Global Transactions & Payments pages (cross-client, filterable)
+- Payments tracking (pending / received, deposits / withdrawals) with mark-as-received
+- Commission earnings report (per client + per month)
+- Dashboard charts (portfolio value by client, realized vs unrealized, top holdings)
+- CSV bulk import of buy lots
 - Soft deletes everywhere — nothing is permanently removed
 - Full audit log of every create/edit/delete with actor, role, and "on behalf of" tracking
 - Dark-themed premium UI
@@ -167,8 +170,11 @@ stock-tracker/
 ├─ src/
 │  ├─ app/
 │  │  ├─ login/           # Login page
-│  │  ├─ dashboard/       # Admin & superadmin dashboard
-│  │  ├─ clients/         # Client list, new, detail, new tx, new payment
+│  │  ├─ dashboard/       # Admin & superadmin dashboard (+ charts)
+│  │  ├─ clients/         # Client list, new, detail, edit, buy, import, payment
+│  │  ├─ transactions/    # Global cross-client buys + sells
+│  │  ├─ payments/        # Global cross-client payments (mark received)
+│  │  ├─ reports/commission/  # Commission earnings report
 │  │  ├─ admins/          # Superadmin: manage admins
 │  │  ├─ audit/           # Audit log viewer (scoped by role)
 │  │  ├─ my/              # Client read-only portfolio view
@@ -177,14 +183,23 @@ stock-tracker/
 │  │  ├─ page.tsx         # Root redirect
 │  │  └─ globals.css      # Dark theme
 │  ├─ components/
-│  │  └─ AppShell.tsx     # Sidebar + layout shell
+│  │  ├─ AppShell.tsx           # Sidebar + layout shell
+│  │  ├─ DashboardCharts.tsx    # recharts dashboard charts
+│  │  ├─ RefreshPricesButton.tsx# Manual price refresh
+│  │  ├─ CsvImport.tsx          # CSV upload/preview/import
+│  │  ├─ PaymentsTable.tsx      # Payments table + edit modal
+│  │  ├─ HoldingsTable.tsx      # Current holdings + sell modal
+│  │  ├─ CompletedTradesTable.tsx# Realized trades + edit modal
+│  │  └─ AuditLogTable.tsx      # Audit log table
 │  ├─ lib/
 │  │  ├─ auth.ts          # Auth.js config (3 roles in JWT)
+│  │  ├─ auth.config.ts   # Edge-safe auth config for middleware
 │  │  ├─ prisma.ts        # Prisma singleton
 │  │  ├─ access.ts        # Role-scoped query helpers
-│  │  ├─ fifo.ts          # FIFO engine + STCG/LTCG classification
+│  │  ├─ actions.ts       # Server actions (sell/edit/delete/payments/client/import/prices)
+│  │  ├─ fifo.ts          # FIFO engine + commission calc
 │  │  ├─ prices.ts        # Yahoo Finance fetcher + cache
-│  │  ├─ audit.ts         # Audit log writer
+│  │  ├─ audit.ts         # Audit log writer (+ summaries)
 │  │  └─ format.ts        # INR and date formatting
 │  └─ middleware.ts       # Role-based route protection
 ├─ package.json
@@ -194,25 +209,25 @@ stock-tracker/
 └─ .env.example
 ```
 
-## How the FIFO engine works
+## How the position model works
 
-When a client sells shares, the engine matches the sold quantity against the oldest remaining buy lots (First-In-First-Out), which is how Indian tax law requires gains to be computed.
+The app uses a **position-based model**, not a transaction ledger:
 
-For each match:
-- **Cost basis** = (buy price + allocated buy commission per share) × shares taken from that lot
-- **Sale proceeds** = (sell price − allocated sell commission per share) × shares taken
-- **Gain** = proceeds − cost basis
-- **Classification** = LTCG if holding > 365 days, else STCG
+- A **buy** creates a `Transaction` row (a "buy lot") with `remainingQty = quantity`. Open lots are your Current Holdings.
+- A **sell** does NOT create a `Transaction`. It creates a `CompletedTrade` that FIFO-matches against the oldest open lots and decrements their `remainingQty`. The matched-lot breakdown is stored in `matchedLotsJson`.
+- **Current Holdings** = all `Transaction` rows with `remainingQty > 0`, grouped by symbol with weighted-average cost.
+- **Realized P&L** = sum of `netPnL` across `CompletedTrade` rows.
+- **Unrealized P&L** = (live price − weighted avg cost) × remaining qty, per holding.
 
-The remaining (unsold) lots become your current holdings, and their weighted average cost is used to compute unrealized gain against the live Yahoo Finance price.
+**Commission** is computed on each completed trade's **gross P&L** (signed — a loss produces a negative commission that reduces the loss), or as a flat ₹ amount. Per-client default with per-trade override.
+
+There is **no STCG/LTCG tax classification** in this version (deliberately dropped).
 
 ## Known limitations / not built yet
 
-- Transaction editing creates reversal entries, but the UI for editing/reversing isn't built yet (schema supports it via `reversedByTransactionId`)
-- No restore UI for soft-deleted records (database supports it; add a superadmin "Trash" page when needed)
-- No charts on dashboard (would be the next polish pass — easy to add with Recharts)
-- Yahoo Finance prices are unofficial and ~15 min delayed; fine for accounting but don't use for active trading
-- Single-admin model currently — the "superadmin acts on behalf of admin" path works in the audit log but the UI for a superadmin to pick which admin they're creating a client under isn't built yet (superadmin-created clients get owned by the superadmin's own user id for now)
+- No restore UI for soft-deleted records (database supports it via `deletedAt`; add a superadmin "Trash" page when needed)
+- Yahoo Finance prices are unofficial and ~15 min delayed; fine for accounting but don't use for active trading. Use the **Refresh prices** button to force a live re-fetch (bypasses the 10-min cache)
+- Performance pass (Vercel region, query optimization, loading skeletons) is intentionally deferred
 
 ## Troubleshooting
 

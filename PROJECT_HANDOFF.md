@@ -214,32 +214,38 @@ Locations to update:
 
 ---
 
-## 7. Roadmap (after the 3 bugs above are fixed and pushed)
+## 7. Roadmap — STATUS UPDATE
 
-The user agreed to a phased rollout. Phase 1 (the position model) is shipped. Phases 2–6 are pending. Build them **one at a time, in this order**, pushing after each phase so the user can test:
+The user agreed to a phased rollout. Phase 1 (the position model) is shipped. **Phases 2–6 are now COMPLETE** (implemented in a follow-up session, re-prioritized into a new plan that also added global Transactions/Payments pages, client edit, and a commission report). Only the perf phase remains.
 
-### Phase 2 — Superadmin "act as admin" flow
-When the superadmin creates a new client, they should be able to **pick which admin owns it** from a dropdown. Currently the create-client form hardcodes `adminId = session.user.id`, which means superadmin-created clients get owned by the superadmin themselves and don't show up under the right admin. Fix: add an admin selector to `clients/new/page.tsx`, only visible to superadmin role; default to current user if admin role.
+### ✅ DONE — Global Transactions & Payments pages
+- `/transactions` — unified cross-client list of buys + sells, filterable by client/symbol/type/date.
+- `/payments` — cross-client payments with pending/received net totals, filters, inline mark-as-received, edit + delete modals.
+- New server actions in `src/lib/actions.ts`: `markPaymentReceivedAction`, `editPaymentAction`, `deletePaymentAction`.
+- New component `src/components/PaymentsTable.tsx`. Nav items added for admin + superadmin.
 
-### Phase 3 — Live price refresh button
-Currently prices are cached for 10 minutes in `PriceSnapshot` and only update lazily when a page loads. Add a small "refresh prices" button on the client detail page and dashboard that calls a server action which clears the cache for the relevant symbols and re-fetches from Yahoo Finance. Show a small spinner while it's working.
+### ✅ DONE — Client edit + commission management
+- `/clients/[id]/edit` — edit name/email/phone + default commission. New `updateClientAction`.
+- `/reports/commission` — commission earnings report (total + per-client + per-month), filterable by client/date.
 
-### Phase 4 — Dashboard charts
-Use `recharts` (already in `package.json`). Three charts on the admin dashboard:
-1. Portfolio value over time (per client, line chart) — needs a `PortfolioSnapshot` table populated by a daily cron, OR computed on-the-fly from transactions + current prices (simpler for v1)
-2. Realized vs unrealized P&L breakdown (donut)
-3. Top 5 holdings by value (horizontal bar)
+### ✅ DONE — Phase 2: Superadmin "act as admin"
+`clients/new/page.tsx` now shows an "Assign to Admin" dropdown for superadmin (lists active admins); `createClientAction` validates and assigns the chosen admin. Admins still own their own clients.
 
-### Phase 5 — CSV import
-Bulk-load buy lots from a CSV. Format: `symbol, exchange, quantity, pricePerShare, tradeDate, notes`. Build a `/clients/[id]/import` page with a file upload, validate the rows, show a preview, then commit on confirm. Each imported row goes through the same audit log path. Include a downloadable CSV template.
+### ✅ DONE — Phase 3: Live price refresh
+`refreshPricesAction` clears `PriceSnapshot` cache for the caller's open-holding symbols and re-fetches from Yahoo. `src/components/RefreshPricesButton.tsx` (spinner + `router.refresh()`) added to dashboard + client detail.
 
-### Phase 6 — Speed/perf fixes (do LAST, only when user asks)
-The user explicitly said *"about speed fixes, do it at last phase when I tell you to do."* Do not start this until the user requests it. When they do:
-1. Move Vercel function region from `iad1` to `bom1` (Mumbai) via `vercel.json` — biggest single win because Supabase is in Mumbai and current cross-continental round-trips add 250–400ms per query
-2. Replace `findMany({ include: ... })` with explicit `select` to fetch only needed columns
-3. Wrap independent queries in `Promise.all` for parallel execution
-4. Add loading.tsx files for skeleton UIs on dashboard, clients list, client detail
-5. Add indexes on `(clientId, deletedAt)` and `(clientId, symbol, deletedAt)` if not already there
+### ✅ DONE — Phase 4: Dashboard charts
+`recharts` added to `package.json`. `src/components/DashboardCharts.tsx` renders: portfolio value by client (bar), realized vs unrealized (donut), top 5 holdings (horizontal bar). Wired into `dashboard/page.tsx`.
+
+### ✅ DONE — Phase 5: CSV import
+`/clients/[id]/import` + `src/components/CsvImport.tsx`: template download, browser-side CSV parse + per-row validation, preview table, commit. `importBuyLotsAction` re-validates server-side and creates lots in one transaction with an audit entry.
+
+### ✅ DONE — Phase 6: Speed/perf fixes
+1. ✅ `vercel.json` created with `regions: ["bom1"]` (Mumbai) — co-locates functions with Supabase `ap-south-1`, cutting cross-continental round-trips.
+2. ✅ Dashboard query switched from `include` to explicit `select` (only needed columns for transactions/trades/payments) — less data over the pooler.
+3. ✅ Independent queries already use `Promise.all` (client detail page, prices).
+4. ✅ `loading.tsx` skeletons added for dashboard, clients, client detail, transactions, payments, my — via `src/components/Skeleton.tsx` + `.skeleton` shimmer CSS.
+5. ✅ Indexes added: `(clientId, deletedAt)` on Transaction/CompletedTrade/Payment, and `(clientId, symbol, deletedAt)` on Transaction. **Requires `npx prisma db push` to apply.**
 
 ---
 

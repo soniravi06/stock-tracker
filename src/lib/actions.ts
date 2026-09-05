@@ -1,9 +1,10 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { requireSession, getAuthorizedClient } from "@/lib/access";
+import { requireSession, getAuthorizedClient, scopedClientWhere } from "@/lib/access";
 import { writeAudit } from "@/lib/audit";
 import { planFifoSell, computeCommission } from "@/lib/fifo";
+import { getPrice } from "@/lib/prices";
 import { revalidatePath } from "next/cache";
 
 // ============================================================
@@ -461,4 +462,138 @@ export async function updateClientAction(formData: FormData) {
   revalidatePath("/dashboard");
   revalidatePath("/my");
   revalidatePath("/audit");
+}
+
+// ============================================================
+// REFRESH live prices — clears the cache for the caller's symbols
+// and re-fetches from Yahoo Finance. Optionally scoped to one client.
+// ============================================================
+export async function refreshPricesAction(formData: FormData) {
+  const session = await requireSession();
+
+  const clientIdRaw = String(formData.get("clientId") || "").trim();
+
+  // Determine which symbols to refresh.
+  let symbols: { symbol: string; exchange: "NSE" | "BSE" }[] = [];
+
+  if (clientIdRaw) {
+    // Single client (must be authorized to view it)
+    const client = await getAuthorizedClient(clientIdRaw);
+    if (!client) throw new Error("client not found");
+    const lots = await prisma.transaction.findMany({
+      where: { clientId: clientIdRaw, deletedAt: null, remainingQty: { gt: 0 } },
+      select: { symbol: true, exchange: true },
+      distinct: ["symbol"],
+    });
+    symbols = lots.map((l) => ({ symbol: l.symbol, exchange: l.exchange }));
+  } else {
+    // All scoped clients (dashboard)
+    const where = await scopedClientWhere();
+    const clients = await prisma.client.findMany({ where, select: { id: true } });
+    const ids = clients.map((c) => c.id);
+    if (ids.length > 0) {
+      const lots = await prisma.transaction.findMany({
+        where: { clientId: { in: ids }, deletedAt: null, remainingQty: { gt: 0 } },
+        select: { symbol: true, exchange: true },
+        distinct: ["symbol"],
+      });
+      symbols = lots.map((l) => ({ symbol: l.symbol, exchange: l.exchange }));
+    }
+  }
+
+  // Bust the cache for these symbols, then re-fetch fresh prices.
+  if (symbols.length > 0) {
+    await prisma.priceSnapshot.deleteMany({
+      where: { OR: symbols.map((s) => ({ symbol: s.symbol, exchange: s.exchange })) },
+    });
+    await Promise.all(symbols.map((s) => getPrice(s.symbol, s.exchange)));
+  }
+
+  if (clientIdRaw) revalidatePath(`/clients/${clientIdRaw}`);
+  revalidatePath("/dashboard");
+  revalidatePath("/clients");
+  revalidatePath("/my");
+
+  return { refreshed: symbols.length };
+}
+
+// ============================================================
+// IMPORT buy lots from CSV — creates many Transaction rows.
+// Rows are pre-validated on the client; we re-validate server-side.
+// ============================================================
+export async function importBuyLotsAction(formData: FormData) {
+  const session = await requireSession();
+  if (session.user.role === "client") throw new Error("read-only");
+
+  const clientId = String(formData.get("clientId"));
+  const client = await getAuthorizedClient(clientId);
+  if (!client) throw new Error("client not found");
+
+  const rowsJson = String(formData.get("rows") || "[]");
+  let rows: {
+    symbol: string;
+    exchange: "NSE" | "BSE";
+    quantity: number;
+    pricePerShare: number;
+    tradeDate: string;
+    notes?: string | null;
+  }[];
+  try {
+    rows = JSON.parse(rowsJson);
+    if (!Array.isArray(rows)) throw new Error("not an array");
+  } catch {
+    throw new Error("invalid rows payload");
+  }
+
+  // Server-side validation
+  const valid = rows.filter(
+    (r) =>
+      r &&
+      typeof r.symbol === "string" &&
+      r.symbol.trim() !== "" &&
+      (r.exchange === "NSE" || r.exchange === "BSE") &&
+      Number(r.quantity) > 0 &&
+      Number(r.pricePerShare) > 0 &&
+      !isNaN(new Date(r.tradeDate).getTime())
+  );
+  if (valid.length === 0) throw new Error("no valid rows to import");
+
+  const created = await prisma.$transaction(async (tx) => {
+    const out = [];
+    for (const r of valid) {
+      const t = await tx.transaction.create({
+        data: {
+          clientId,
+          symbol: r.symbol.trim().toUpperCase(),
+          exchange: r.exchange,
+          quantity: Number(r.quantity),
+          remainingQty: Number(r.quantity),
+          pricePerShare: Number(r.pricePerShare),
+          tradeDate: new Date(r.tradeDate),
+          notes: r.notes ? String(r.notes).trim() : null,
+          createdByUserId: session.user.id,
+        },
+      });
+      out.push(t);
+    }
+    return out;
+  });
+
+  await writeAudit({
+    actorUserId: session.user.id,
+    actorRole: session.user.role,
+    onBehalfOfAdminId: session.user.role === "superadmin" ? client.adminId : null,
+    action: "create",
+    entityType: "Transaction",
+    entityId: clientId,
+    after: { imported: created.length, symbols: [...new Set(valid.map((r) => r.symbol.toUpperCase()))] },
+  });
+
+  revalidatePath(`/clients/${clientId}`);
+  revalidatePath("/clients");
+  revalidatePath("/dashboard");
+  revalidatePath("/my");
+  revalidatePath("/audit");
+
+  return { imported: created.length };
 }
