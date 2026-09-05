@@ -66,7 +66,8 @@ export default async function PaymentsPage({
     .reduce((s, r) => s + (r.direction === "in" ? r.amount : -r.amount), 0);
 
   const isSuper = session.user.role === "superadmin";
-  const canEdit = session.user.role !== "client";
+  // Clients are redirected above, so anyone reaching here can edit.
+  const canEdit = true;
 
   return (
     <AppShell role={session.user.role} userName={session.user.name || session.user.email} currentPath="/payments">
