@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { AppShell } from "@/components/AppShell";
 import { buildHoldings } from "@/lib/fifo";
 import { getPrices } from "@/lib/prices";
-import { inr, fmtDate, fmtNum } from "@/lib/format";
+import { inr, fmtDate, fmtNum, fmtDateTime } from "@/lib/format";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { HoldingsTable } from "@/components/HoldingsTable";
@@ -195,7 +195,7 @@ export default async function ClientDetailPage({
                   return (
                     <tr key={e.id} style={isTriggered ? { background: "rgba(245, 158, 11, 0.08)" } : undefined}>
                       <td style={{ color: "#9ca3af", fontSize: "0.8rem", whiteSpace: "nowrap" }}>
-                        {new Date(e.triggeredAt).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        {fmtDateTime(e.triggeredAt)} IST
                       </td>
                       <td style={{ fontWeight: 600 }}>{e.symbol}</td>
                       <td style={{ fontSize: "0.8rem", color: "#9ca3af" }}>{e.message}</td>

@@ -166,7 +166,7 @@ export function HoldingsTable({
                                     {fmtDate(l.buyDate)}
                                     {triggered && alert?.triggeredAt && (
                                       <div style={{ fontSize: "0.65rem", color: "#f59e0b", marginTop: 2 }}>
-                                        ⚡ Hit {inr(alert.triggeredPrice ?? 0)} · {new Date(alert.triggeredAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                                        ⚡ Hit {inr(alert.triggeredPrice ?? 0)} · {new Date(alert.triggeredAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true })} IST
                                       </div>
                                     )}
                                   </td>
