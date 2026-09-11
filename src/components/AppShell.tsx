@@ -1,11 +1,23 @@
 import Link from "next/link";
-import { signOut } from "@/lib/auth";
+import { signOut, auth } from "@/lib/auth";
+import { writeAudit } from "@/lib/audit";
 import type { Role } from "@prisma/client";
 import { IdleLogout } from "@/components/IdleLogout";
 import { FeedbackButton } from "@/components/FeedbackButton";
 
 async function logoutAction() {
   "use server";
+  const session = await auth();
+  if (session?.user) {
+    await writeAudit({
+      actorUserId: session.user.id,
+      actorRole: session.user.role,
+      action: "logout",
+      entityType: "Auth",
+      entityId: session.user.id,
+      after: { email: session.user.email },
+    });
+  }
   await signOut({ redirectTo: "/login" });
 }
 

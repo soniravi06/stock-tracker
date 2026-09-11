@@ -2,11 +2,11 @@ import { prisma } from "@/lib/prisma";
 import type { Role } from "@prisma/client";
 
 type LogArgs = {
-  actorUserId: string;
+  actorUserId: string | null;
   actorRole: Role;
   onBehalfOfAdminId?: string | null;
-  action: "create" | "update" | "soft_delete" | "restore" | "delete";
-  entityType: "Client" | "Transaction" | "CompletedTrade" | "Payment" | "User" | "PriceAlert";
+  action: "create" | "update" | "soft_delete" | "restore" | "delete" | "login" | "logout" | "login_failed";
+  entityType: "Client" | "Transaction" | "CompletedTrade" | "Payment" | "User" | "PriceAlert" | "Feedback" | "Auth";
   entityId: string;
   before?: unknown;
   after?: unknown;
@@ -113,6 +113,10 @@ function generateSummary(args: LogArgs): string {
   }
 
   if (action === "restore") return `Restored ${entityType}`;
+
+  if (action === "login") return `Logged in (${(a?.email as string) ?? "unknown"})`;
+  if (action === "logout") return `Logged out (${(a?.email as string) ?? "unknown"})`;
+  if (action === "login_failed") return `Failed login attempt (${(a?.email as string) ?? "unknown"})`;
 
   return `${action} ${entityType}`;
 }

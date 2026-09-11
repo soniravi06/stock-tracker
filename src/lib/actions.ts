@@ -652,8 +652,17 @@ export async function submitFeedbackAction(formData: FormData) {
   if (!ALLOWED_PAGES[role]?.includes(page)) throw new Error("invalid page");
   if (message.length < 3) throw new Error("feedback too short");
 
-  await prisma.feedback.create({
+  const fb = await prisma.feedback.create({
     data: { userId: session.user.id, role, page, message },
+  });
+
+  await writeAudit({
+    actorUserId: session.user.id,
+    actorRole: session.user.role,
+    action: "create",
+    entityType: "Feedback",
+    entityId: fb.id,
+    after: { page, message },
   });
 
   return { ok: true };
@@ -709,6 +718,15 @@ export async function updatePhoneAction(formData: FormData) {
       data: { phone: phone || null },
     });
   }
+
+  await writeAudit({
+    actorUserId: session.user.id,
+    actorRole: session.user.role,
+    action: "update",
+    entityType: "User",
+    entityId: session.user.id,
+    after: { phoneUpdated: true },
+  });
 
   return { ok: true };
 }

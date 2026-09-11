@@ -250,8 +250,8 @@ model PriceSnapshot {
 
 model AuditLog {
   id                String   @id @default(cuid())
-  actorUserId       String
-  actor             User     @relation("Actor", fields: [actorUserId], references: [id])
+  actorUserId       String?
+  actor             User?    @relation("Actor", fields: [actorUserId], references: [id])
   actorRole         Role
   onBehalfOfAdminId String?
   action            String
