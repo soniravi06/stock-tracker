@@ -2,26 +2,17 @@ import { requireSession } from "@/lib/access";
 import { prisma } from "@/lib/prisma";
 import { AppShell } from "@/components/AppShell";
 import { AuditLogTable } from "@/components/AuditLogTable";
+import { redirect } from "next/navigation";
 
 export default async function AuditPage() {
   const session = await requireSession();
 
-  // Scope: superadmin sees all, admin sees own + entries affecting their clients,
-  // client sees entries affecting only their own client row
-  let where: any = {};
-  if (session.user.role === "admin") {
-    where = {
-      OR: [
-        { actorUserId: session.user.id },
-        { onBehalfOfAdminId: session.user.id },
-      ],
-    };
-  } else if (session.user.role === "client") {
-    where = {
-      entityType: { in: ["Client", "Transaction", "Payment"] },
-      entityId: session.user.linkedClientId || "__none__",
-    };
+  // Audit log is superadmin-only
+  if (session.user.role !== "superadmin") {
+    redirect(session.user.role === "client" ? "/my" : "/dashboard");
   }
+
+  const where: any = {};
 
   const logs = await prisma.auditLog.findMany({
     where,
