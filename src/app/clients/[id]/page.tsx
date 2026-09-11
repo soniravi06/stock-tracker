@@ -9,6 +9,8 @@ import Link from "next/link";
 import { HoldingsTable } from "@/components/HoldingsTable";
 import { CompletedTradesTable } from "@/components/CompletedTradesTable";
 import { RefreshPricesButton } from "@/components/RefreshPricesButton";
+import { evaluateAlertsForClient } from "@/lib/alerts";
+import { dismissAlertAction } from "@/lib/actions";
 
 export default async function ClientDetailPage({
   params,
@@ -45,6 +47,22 @@ export default async function ClientDetailPage({
     return { symbol, exchange: exchange as "NSE" | "BSE" };
   });
   const priceMap = await getPrices(symbols);
+
+  // Evaluate active alerts against current prices (fail-safe)
+  await evaluateAlertsForClient(id, priceMap);
+
+  // Load alerts (non-deleted) + trigger history for this client
+  const [alerts, alertEvents] = await Promise.all([
+    prisma.priceAlert.findMany({
+      where: { clientId: id, deletedAt: null, status: { in: ["active", "triggered"] } },
+    }),
+    prisma.alertEvent.findMany({
+      where: { clientId: id },
+      orderBy: { triggeredAt: "desc" },
+      take: 100,
+    }),
+  ]);
+  const alertStatusById = new Map(alerts.map((a) => [a.id, a.status]));
 
   let portfolioValue = 0;
   let totalUnrealized = 0;
@@ -141,7 +159,70 @@ export default async function ClientDetailPage({
         defaultCommissionType={client.defaultCommissionType}
         defaultCommissionValue={client.defaultCommissionValue}
         canEdit={canEdit}
+        alerts={alerts.map((a) => ({
+          id: a.id,
+          transactionId: a.transactionId,
+          mode: a.mode,
+          direction: a.direction,
+          targetPrice: a.targetPrice,
+          targetPercent: a.targetPercent,
+          status: a.status,
+          triggeredAt: a.triggeredAt?.toISOString() ?? null,
+          triggeredPrice: a.triggeredPrice,
+        }))}
       />
+
+      {canEdit && alertEvents.length > 0 && (
+        <>
+          <div style={{ height: 32 }} />
+          <SectionHeader title="Alert History" />
+          <div className="glass" style={{ overflow: "hidden" }}>
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>Triggered At</th>
+                  <th>Symbol</th>
+                  <th>Details</th>
+                  <th style={{ textAlign: "right" }}>Price</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {alertEvents.map((e) => {
+                  const status = alertStatusById.get(e.alertId);
+                  const isTriggered = status === "triggered";
+                  return (
+                    <tr key={e.id} style={isTriggered ? { background: "rgba(245, 158, 11, 0.08)" } : undefined}>
+                      <td style={{ color: "#9ca3af", fontSize: "0.8rem", whiteSpace: "nowrap" }}>
+                        {new Date(e.triggeredAt).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      </td>
+                      <td style={{ fontWeight: 600 }}>{e.symbol}</td>
+                      <td style={{ fontSize: "0.8rem", color: "#9ca3af" }}>{e.message}</td>
+                      <td style={{ textAlign: "right" }}>{inr(e.priceAtTrigger)}</td>
+                      <td>
+                        <span className="badge" style={isTriggered
+                          ? { background: "rgba(245,158,11,0.15)", color: "#fbbf24", border: "1px solid rgba(245,158,11,0.35)" }
+                          : { background: "rgba(255,255,255,0.06)", color: "#9ca3af" }}>
+                          {isTriggered ? "TRIGGERED" : status === "active" ? "RE-ARMED" : "DISMISSED"}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        {isTriggered && (
+                          <form action={dismissAlertAction}>
+                            <input type="hidden" name="alertId" value={e.alertId} />
+                            <button type="submit" className="btn btn-ghost" style={{ fontSize: "0.7rem", padding: "0.3rem 0.7rem" }}>Dismiss</button>
+                          </form>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
 
       <div style={{ height: 32 }} />
 

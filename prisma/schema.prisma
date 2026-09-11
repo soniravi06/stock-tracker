@@ -47,6 +47,22 @@ enum PaymentStatus {
   received
 }
 
+enum AlertMode {
+  price
+  percent
+}
+
+enum AlertDirection {
+  above
+  below
+}
+
+enum AlertStatus {
+  active
+  triggered
+  dismissed
+}
+
 model User {
   id             String    @id @default(cuid())
   email          String    @unique
@@ -75,6 +91,7 @@ model Client {
   transactions            Transaction[]
   completedTrades         CompletedTrade[]
   payments                Payment[]
+  priceAlerts             PriceAlert[]
   createdAt               DateTime         @default(now())
   updatedAt               DateTime         @updatedAt
   deletedAt               DateTime?
@@ -98,6 +115,7 @@ model Transaction {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   deletedAt         DateTime?
+  priceAlerts       PriceAlert[]
 
   @@index([clientId])
   @@index([symbol])
@@ -160,6 +178,48 @@ model Payment {
   @@index([clientId])
   @@index([status])
   @@index([clientId, deletedAt])
+}
+
+// A price alert rule attached to a single BUY lot.
+model PriceAlert {
+  id             String         @id @default(cuid())
+  transactionId  String
+  transaction    Transaction    @relation(fields: [transactionId], references: [id])
+  clientId       String
+  client         Client         @relation(fields: [clientId], references: [id])
+  mode           AlertMode
+  direction      AlertDirection
+  targetPrice    Float?         // used when mode = price
+  targetPercent  Float?         // used when mode = percent (signed, e.g. 10 or -5)
+  status         AlertStatus    @default(active)
+  triggeredAt    DateTime?
+  triggeredPrice Float?
+  createdByUserId String
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  deletedAt      DateTime?
+  events         AlertEvent[]
+
+  @@index([clientId])
+  @@index([transactionId])
+  @@index([status])
+}
+
+// Immutable history of every alert trigger.
+model AlertEvent {
+  id             String     @id @default(cuid())
+  alertId        String
+  alert          PriceAlert @relation(fields: [alertId], references: [id])
+  transactionId  String
+  clientId       String
+  symbol         String
+  priceAtTrigger Float
+  message        String
+  triggeredAt    DateTime   @default(now())
+
+  @@index([clientId])
+  @@index([alertId])
+  @@index([triggeredAt])
 }
 
 model PriceSnapshot {

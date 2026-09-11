@@ -33,7 +33,9 @@ export default async function AuditPage() {
   const entries = logs.map((l) => ({
     id: l.id,
     createdAt: l.createdAt.toISOString(),
-    actorName: l.actor.name || l.actor.email,
+    // actor can be null if the referenced User no longer exists (e.g. after a
+    // DB reset, or a soft-deleted user). Fall back to a placeholder instead of throwing.
+    actorName: l.actor?.name || l.actor?.email || "Unknown user",
     actorRole: l.actorRole,
     action: l.action,
     entityType: l.entityType,

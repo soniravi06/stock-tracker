@@ -5,8 +5,8 @@ type LogArgs = {
   actorUserId: string;
   actorRole: Role;
   onBehalfOfAdminId?: string | null;
-  action: "create" | "update" | "soft_delete" | "restore";
-  entityType: "Client" | "Transaction" | "CompletedTrade" | "Payment" | "User";
+  action: "create" | "update" | "soft_delete" | "restore" | "delete";
+  entityType: "Client" | "Transaction" | "CompletedTrade" | "Payment" | "User" | "PriceAlert";
   entityId: string;
   before?: unknown;
   after?: unknown;
@@ -44,6 +44,8 @@ function generateSummary(args: LogArgs): string {
     }
     return `Created ${entityType}`;
   }
+
+  if (action === "delete") return `Deleted ${entityType}`;
 
   if (action === "soft_delete") {
     if (entityType === "CompletedTrade" && b) {

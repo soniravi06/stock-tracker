@@ -145,3 +145,17 @@ table.data tr:hover td { background: rgba(255,255,255,0.02); }
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+@keyframes alert-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.alert-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f59e0b;
+  box-shadow: 0 0 6px #f59e0b;
+  animation: alert-pulse 1.6s ease-in-out infinite;
+}

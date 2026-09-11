@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, Fragment } from "react";
-import { sellFromHoldingAction, editBuyLotAction, deleteBuyLotAction } from "@/lib/actions";
+import { sellFromHoldingAction, editBuyLotAction, deleteBuyLotAction, setLotAlertAction, deleteLotAlertAction } from "@/lib/actions";
 
 type Lot = {
   transactionId: string;
@@ -9,6 +9,18 @@ type Lot = {
   originalQty: number;
   remainingQty: number;
   pricePerShare: number;
+};
+
+export type LotAlert = {
+  id: string;
+  transactionId: string;
+  mode: "price" | "percent";
+  direction: "above" | "below";
+  targetPrice: number | null;
+  targetPercent: number | null;
+  status: "active" | "triggered" | "dismissed";
+  triggeredAt: string | null;
+  triggeredPrice: number | null;
 };
 
 type Holding = {
@@ -39,6 +51,7 @@ export function HoldingsTable({
   defaultCommissionType,
   defaultCommissionValue,
   canEdit,
+  alerts = [],
 }: {
   holdings: Holding[];
   prices: Record<string, number>;
@@ -46,10 +59,14 @@ export function HoldingsTable({
   defaultCommissionType: "percentage" | "flat";
   defaultCommissionValue: number;
   canEdit: boolean;
+  alerts?: LotAlert[];
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [sellFor, setSellFor] = useState<Holding | null>(null);
   const [editLot, setEditLot] = useState<Lot | null>(null);
+  const [alertFor, setAlertFor] = useState<{ lot: Lot; symbol: string } | null>(null);
+
+  const alertByLot = new Map(alerts.map((a) => [a.transactionId, a]));
 
   const toggle = (sym: string) => {
     setExpanded((prev) => {
@@ -84,6 +101,7 @@ export function HoldingsTable({
               const px = prices[h.symbol];
               const mv = px != null ? px * h.totalQty : null;
               const unrl = px != null ? (px - h.avgCostPerShare) * h.totalQty : null;
+              const hasTriggered = h.lots.some((l) => alertByLot.get(l.transactionId)?.status === "triggered");
               return (
                 <Fragment key={h.symbol}>
                   <tr style={{ cursor: "pointer" }} onClick={() => toggle(h.symbol)}>
@@ -93,6 +111,9 @@ export function HoldingsTable({
                       <span style={{ color: "#6b7280", fontSize: "0.7rem", marginLeft: 6 }}>{h.exchange}</span>
                       {h.lots.length > 1 && (
                         <span style={{ color: "#7c5cff", fontSize: "0.7rem", marginLeft: 6 }}>({h.lots.length} lots)</span>
+                      )}
+                      {hasTriggered && (
+                        <span title="Alert triggered" className="alert-dot" style={{ marginLeft: 6 }} />
                       )}
                     </td>
                     <td style={{ textAlign: "right" }}>{fmtNum(h.totalQty)}</td>
@@ -133,9 +154,22 @@ export function HoldingsTable({
                               </tr>
                             </thead>
                             <tbody>
-                              {h.lots.map((l) => (
-                                <tr key={l.transactionId}>
-                                  <td style={{ padding: "0.35rem 0.5rem" }}>{fmtDate(l.buyDate)}</td>
+                              {h.lots.map((l) => {
+                                const alert = alertByLot.get(l.transactionId);
+                                const triggered = alert?.status === "triggered";
+                                return (
+                                <tr
+                                  key={l.transactionId}
+                                  style={triggered ? { background: "rgba(245, 158, 11, 0.12)", boxShadow: "inset 3px 0 0 #f59e0b" } : undefined}
+                                >
+                                  <td style={{ padding: "0.35rem 0.5rem" }}>
+                                    {fmtDate(l.buyDate)}
+                                    {triggered && alert?.triggeredAt && (
+                                      <div style={{ fontSize: "0.65rem", color: "#f59e0b", marginTop: 2 }}>
+                                        ⚡ Hit {inr(alert.triggeredPrice ?? 0)} · {new Date(alert.triggeredAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                                      </div>
+                                    )}
+                                  </td>
                                   <td style={{ textAlign: "right", padding: "0.35rem 0.5rem" }}>{fmtNum(l.originalQty)}</td>
                                   <td style={{ textAlign: "right", padding: "0.35rem 0.5rem" }}>
                                     {fmtNum(l.remainingQty)}
@@ -146,7 +180,16 @@ export function HoldingsTable({
                                   <td style={{ textAlign: "right", padding: "0.35rem 0.5rem" }}>{inr(l.pricePerShare)}</td>
                                   <td style={{ textAlign: "right", padding: "0.35rem 0.5rem" }}>{inr(l.remainingQty * l.pricePerShare)}</td>
                                   {canEdit && (
-                                    <td style={{ textAlign: "right", padding: "0.35rem 0.5rem" }}>
+                                    <td style={{ textAlign: "right", padding: "0.35rem 0.5rem", whiteSpace: "nowrap" }}>
+                                      <button
+                                        type="button"
+                                        className="btn btn-ghost"
+                                        style={{ fontSize: "0.65rem", padding: "0.2rem 0.5rem", marginRight: 4, color: triggered ? "#f59e0b" : alert ? "#a78bfa" : undefined }}
+                                        onClick={() => setAlertFor({ lot: l, symbol: h.symbol })}
+                                        title={alert ? (triggered ? "Alert triggered — view" : "Edit alert") : "Set alert"}
+                                      >
+                                        {triggered ? "🔔" : alert ? "🔔" : "🔕"}
+                                      </button>
                                       <button
                                         type="button"
                                         className="btn btn-ghost"
@@ -160,7 +203,8 @@ export function HoldingsTable({
                                     </td>
                                   )}
                                 </tr>
-                              ))}
+                                );
+                              })}
                             </tbody>
                           </table>
                         </div>
@@ -188,7 +232,107 @@ export function HoldingsTable({
       {editLot && (
         <EditLotModal lot={editLot} onClose={() => setEditLot(null)} />
       )}
+
+      {alertFor && (
+        <AlertModal
+          lot={alertFor.lot}
+          symbol={alertFor.symbol}
+          currentPrice={prices[alertFor.symbol]}
+          existing={alertByLot.get(alertFor.lot.transactionId)}
+          onClose={() => setAlertFor(null)}
+        />
+      )}
     </>
+  );
+}
+
+function AlertModal({
+  lot,
+  symbol,
+  currentPrice,
+  existing,
+  onClose,
+}: {
+  lot: Lot;
+  symbol: string;
+  currentPrice?: number;
+  existing?: LotAlert;
+  onClose: () => void;
+}) {
+  const [mode, setMode] = useState<"price" | "percent">(existing?.mode ?? "percent");
+  const [direction, setDirection] = useState<"above" | "below">(existing?.direction ?? "above");
+  const [value, setValue] = useState<string>(
+    existing ? String(existing.mode === "price" ? existing.targetPrice : Math.abs(existing.targetPercent ?? 0)) : ""
+  );
+
+  const v = parseFloat(value) || 0;
+  const threshold = mode === "price" ? v : lot.pricePerShare * (1 + (direction === "below" ? -v : v) / 100);
+  const triggered = existing?.status === "triggered";
+
+  return (
+    <Modal onClose={onClose} title={`Alert — ${symbol} lot`}>
+      <div style={{ fontSize: "0.8rem", color: "#9ca3af", marginBottom: "1rem" }}>
+        Lot bought {fmtDate(lot.buyDate)} at <strong style={{ color: "#e6e7ee" }}>{inr(lot.pricePerShare)}</strong>
+        {currentPrice != null && <> · current <strong style={{ color: "#e6e7ee" }}>{inr(currentPrice)}</strong></>}
+      </div>
+
+      {triggered && existing?.triggeredAt && (
+        <div style={{ padding: "0.75rem", background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 10, marginBottom: "1rem", fontSize: "0.8rem", color: "#fbbf24" }}>
+          ⚡ Triggered at {inr(existing.triggeredPrice ?? 0)} on {new Date(existing.triggeredAt).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}. Saving will re-arm with a new rule.
+        </div>
+      )}
+
+      <form action={setLotAlertAction} onSubmit={() => setTimeout(onClose, 100)}>
+        <input type="hidden" name="lotId" value={lot.transactionId} />
+        {existing && <input type="hidden" name="alertId" value={existing.id} />}
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginBottom: "0.75rem" }}>
+          <div>
+            <label className="label">Mode</label>
+            <select className="select" name="mode" value={mode} onChange={(e) => setMode(e.target.value as any)}>
+              <option value="percent">% from buy price</option>
+              <option value="price">Target price (₹)</option>
+            </select>
+          </div>
+          <div>
+            <label className="label">Direction</label>
+            <select className="select" name="direction" value={direction} onChange={(e) => setDirection(e.target.value as any)}>
+              <option value="above">Crosses above</option>
+              <option value="below">Falls below</option>
+            </select>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: "0.75rem" }}>
+          <label className="label">{mode === "price" ? "Target price (₹) *" : "Percent (%) *"}</label>
+          <input className="input" type="number" name="value" required min="0.01" step="any" value={value} onChange={(e) => setValue(e.target.value)} />
+        </div>
+
+        {v > 0 && (
+          <div style={{ padding: "0.75rem", background: "rgba(255,255,255,0.03)", borderRadius: 10, marginBottom: "1rem", fontSize: "0.8rem", color: "#9ca3af" }}>
+            Triggers when price {direction === "above" ? "≥" : "≤"} <strong style={{ color: "#e6e7ee" }}>{inr(threshold)}</strong>
+            {mode === "percent" && <> ({direction === "above" ? "+" : "−"}{v}% vs buy {inr(lot.pricePerShare)})</>}
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: "0.5rem", marginTop: "1.25rem", justifyContent: "space-between" }}>
+          {existing ? (
+            <button
+              type="submit"
+              formAction={deleteLotAlertAction}
+              className="btn btn-danger"
+              onClick={(e) => { if (!confirm("Remove this alert?")) e.preventDefault(); }}
+            >
+              Remove Alert
+            </button>
+          ) : <span />}
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn btn-primary">{existing ? "Update Alert" : "Set Alert"}</button>
+          </div>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

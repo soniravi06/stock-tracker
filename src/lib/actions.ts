@@ -518,6 +518,122 @@ export async function refreshPricesAction(formData: FormData) {
 }
 
 // ============================================================
+// PRICE ALERTS — per buy lot. Admin/superadmin only.
+// ============================================================
+export async function setLotAlertAction(formData: FormData) {
+  const session = await requireSession();
+  if (session.user.role === "client") throw new Error("read-only");
+
+  const lotId = String(formData.get("lotId"));
+  const mode = String(formData.get("mode")) as "price" | "percent";
+  const direction = String(formData.get("direction")) as "above" | "below";
+  const value = parseFloat(String(formData.get("value")));
+
+  if (mode !== "price" && mode !== "percent") throw new Error("invalid mode");
+  if (direction !== "above" && direction !== "below") throw new Error("invalid direction");
+  if (!isFinite(value) || value <= 0) throw new Error("invalid value");
+
+  const lot = await prisma.transaction.findUnique({ where: { id: lotId } });
+  if (!lot || lot.deletedAt) throw new Error("lot not found");
+
+  const client = await getAuthorizedClient(lot.clientId);
+  if (!client) throw new Error("unauthorized");
+
+  // Replace any existing active/triggered alert on this lot (one rule per lot)
+  await prisma.priceAlert.updateMany({
+    where: { transactionId: lotId, deletedAt: null, status: { in: ["active", "triggered"] } },
+    data: { deletedAt: new Date() },
+  });
+
+  const alert = await prisma.priceAlert.create({
+    data: {
+      transactionId: lotId,
+      clientId: lot.clientId,
+      mode,
+      direction,
+      targetPrice: mode === "price" ? value : null,
+      targetPercent: mode === "percent" ? (direction === "below" ? -Math.abs(value) : Math.abs(value)) : null,
+      createdByUserId: session.user.id,
+    },
+  });
+
+  await writeAudit({
+    actorUserId: session.user.id,
+    actorRole: session.user.role,
+    onBehalfOfAdminId: session.user.role === "superadmin" ? client.adminId : null,
+    action: "create",
+    entityType: "PriceAlert",
+    entityId: alert.id,
+    after: alert,
+  });
+
+  revalidatePath(`/clients/${lot.clientId}`);
+  revalidatePath("/audit");
+}
+
+export async function deleteLotAlertAction(formData: FormData) {
+  const session = await requireSession();
+  if (session.user.role === "client") throw new Error("read-only");
+
+  const alertId = String(formData.get("alertId"));
+  const existing = await prisma.priceAlert.findUnique({ where: { id: alertId } });
+  if (!existing || existing.deletedAt) throw new Error("alert not found");
+
+  const client = await getAuthorizedClient(existing.clientId);
+  if (!client) throw new Error("unauthorized");
+
+  await prisma.priceAlert.update({
+    where: { id: alertId },
+    data: { deletedAt: new Date() },
+  });
+
+  await writeAudit({
+    actorUserId: session.user.id,
+    actorRole: session.user.role,
+    onBehalfOfAdminId: session.user.role === "superadmin" ? client.adminId : null,
+    action: "delete",
+    entityType: "PriceAlert",
+    entityId: alertId,
+    before: existing,
+  });
+
+  revalidatePath(`/clients/${existing.clientId}`);
+  revalidatePath("/audit");
+}
+
+export async function dismissAlertAction(formData: FormData) {
+  const session = await requireSession();
+  if (session.user.role === "client") throw new Error("read-only");
+
+  const alertId = String(formData.get("alertId"));
+  const existing = await prisma.priceAlert.findUnique({ where: { id: alertId } });
+  if (!existing || existing.deletedAt) throw new Error("alert not found");
+  if (existing.status !== "triggered") throw new Error("only triggered alerts can be dismissed");
+
+  const client = await getAuthorizedClient(existing.clientId);
+  if (!client) throw new Error("unauthorized");
+
+  await prisma.priceAlert.update({
+    where: { id: alertId },
+    data: { status: "dismissed" },
+  });
+
+  await writeAudit({
+    actorUserId: session.user.id,
+    actorRole: session.user.role,
+    onBehalfOfAdminId: session.user.role === "superadmin" ? client.adminId : null,
+    action: "update",
+    entityType: "PriceAlert",
+    entityId: alertId,
+    before: { status: existing.status },
+    after: { status: "dismissed" },
+  });
+
+  revalidatePath(`/clients/${existing.clientId}`);
+  revalidatePath("/audit");
+}
+
+// ============================================================
 // IMPORT buy lots from CSV — creates many Transaction rows.
 // Rows are pre-validated on the client; we re-validate server-side.
 // ============================================================
