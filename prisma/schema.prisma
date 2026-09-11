@@ -69,10 +69,12 @@ model User {
   passwordHash   String
   role           Role
   name           String?
+  phone          String?
   linkedClientId String?   @unique
   linkedClient   Client?   @relation("ClientLogin", fields: [linkedClientId], references: [id])
   clientsOwned   Client[]  @relation("AdminClients")
   auditLogs      AuditLog[] @relation("Actor")
+  feedback       Feedback[]
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   deletedAt      DateTime?
@@ -220,6 +222,19 @@ model AlertEvent {
   @@index([clientId])
   @@index([alertId])
   @@index([triggeredAt])
+}
+
+model Feedback {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  role      Role
+  page      String
+  message   String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
 }
 
 model PriceSnapshot {

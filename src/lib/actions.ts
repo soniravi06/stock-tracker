@@ -634,6 +634,86 @@ export async function dismissAlertAction(formData: FormData) {
 }
 
 // ============================================================
+// FEEDBACK — any authenticated role can submit feedback for a page
+// they have access to.
+// ============================================================
+const ALLOWED_PAGES: Record<string, string[]> = {
+  superadmin: ["/dashboard", "/admins", "/clients", "/transactions", "/payments", "/reports/commission", "/audit", "/settings"],
+  admin: ["/dashboard", "/clients", "/transactions", "/payments", "/reports/commission", "/settings"],
+  client: ["/my", "/settings"],
+};
+
+export async function submitFeedbackAction(formData: FormData) {
+  const session = await requireSession();
+  const role = session.user.role;
+  const page = String(formData.get("page") || "");
+  const message = String(formData.get("message") || "").trim();
+
+  if (!ALLOWED_PAGES[role]?.includes(page)) throw new Error("invalid page");
+  if (message.length < 3) throw new Error("feedback too short");
+
+  await prisma.feedback.create({
+    data: { userId: session.user.id, role, page, message },
+  });
+
+  return { ok: true };
+}
+
+// ============================================================
+// SETTINGS — change own password / phone (all roles)
+// ============================================================
+export async function changePasswordAction(formData: FormData) {
+  const session = await requireSession();
+  const current = String(formData.get("currentPassword") || "");
+  const next = String(formData.get("newPassword") || "");
+
+  if (next.length < 8) throw new Error("New password must be at least 8 characters");
+
+  const user = await prisma.user.findUnique({ where: { id: session.user.id } });
+  if (!user) throw new Error("user not found");
+
+  const bcrypt = (await import("bcryptjs")).default;
+  const ok = await bcrypt.compare(current, user.passwordHash);
+  if (!ok) throw new Error("Current password is incorrect");
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { passwordHash: await bcrypt.hash(next, 10) },
+  });
+
+  await writeAudit({
+    actorUserId: session.user.id,
+    actorRole: session.user.role,
+    action: "update",
+    entityType: "User",
+    entityId: user.id,
+    after: { passwordChanged: true },
+  });
+
+  return { ok: true };
+}
+
+export async function updatePhoneAction(formData: FormData) {
+  const session = await requireSession();
+  const phone = String(formData.get("phone") || "").trim();
+
+  if (session.user.role === "client") {
+    if (!session.user.linkedClientId) throw new Error("no linked client");
+    await prisma.client.update({
+      where: { id: session.user.linkedClientId },
+      data: { phone: phone || null },
+    });
+  } else {
+    await prisma.user.update({
+      where: { id: session.user.id },
+      data: { phone: phone || null },
+    });
+  }
+
+  return { ok: true };
+}
+
+// ============================================================
 // IMPORT buy lots from CSV — creates many Transaction rows.
 // Rows are pre-validated on the client; we re-validate server-side.
 // ============================================================

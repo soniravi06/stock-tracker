@@ -72,6 +72,13 @@ body {
 }
 .input::placeholder { color: #6b7280; }
 
+/* Native dropdown options render with OS colors — force dark bg + light text
+   so options are readable against the dark theme. */
+.select option {
+  background: #14152a;
+  color: #e6e7ee;
+}
+
 .label {
   display: block;
   font-size: 0.75rem;

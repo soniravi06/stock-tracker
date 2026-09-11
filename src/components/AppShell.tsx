@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { signOut } from "@/lib/auth";
 import type { Role } from "@prisma/client";
+import { IdleLogout } from "@/components/IdleLogout";
+import { FeedbackButton } from "@/components/FeedbackButton";
 
 async function logoutAction() {
   "use server";
@@ -45,6 +47,7 @@ export function AppShell({
 
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
+      <IdleLogout />
       <aside
         style={{
           width: 240,
@@ -107,11 +110,17 @@ export function AppShell({
               {role}
             </div>
           </div>
-          <form action={logoutAction}>
-            <button type="submit" className="btn btn-ghost" style={{ width: "100%", justifyContent: "center" }}>
-              Sign out
-            </button>
-          </form>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+            <FeedbackButton role={role} />
+            <Link href="/settings" className="btn btn-ghost" style={{ width: "100%", justifyContent: "center", textDecoration: "none" }}>
+              Settings
+            </Link>
+            <form action={logoutAction} style={{ margin: 0 }}>
+              <button type="submit" className="btn btn-ghost" style={{ width: "100%", justifyContent: "center" }}>
+                Sign out
+              </button>
+            </form>
+          </div>
         </div>
       </aside>
 
